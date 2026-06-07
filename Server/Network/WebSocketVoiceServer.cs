@@ -145,7 +145,7 @@ namespace Server.Network
                 {
                     ArrayPool<byte>.Shared.Return(buf);
                     if (knownClientId != -1)
-                        _roomManager.UnregisterClient(knownClientId, DateTime.UtcNow.Ticks, 0);
+                        _roomManager.UnregisterClient(knownClientId, sendChannel);
                 }
             }
             catch (OperationCanceledException) { }

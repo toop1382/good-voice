@@ -720,5 +720,42 @@ public class Tier2Tests : IClassFixture<ServerFixture>
         Assert.True(joinSuccess, "TCP Join room failed.");
     }
 
+    [Fact]
+    public async Task T2_5_7_TcpReconnectSameClientId_Success()
+    {
+        if (_fixture.ServerProcess == null) return;
+        
+        IPEndPoint tcpEndPoint = new IPEndPoint(_fixture.ServerEndPoint.Address, 50006);
+        int clientId = 33333;
+        int roomId = 333;
+        
+        // 1. Connect and join with client1
+        using (var client1 = new RawTcpTestClient(clientId, tcpEndPoint))
+        {
+            var (hs1, join1) = await PerformTcpHandshakeAndJoinAsync(client1, roomId);
+            Assert.True(hs1 && join1, "Initial connection failed.");
+        } // client1 is disposed here, closing the socket
+        
+        // 2. Immediately reconnect with client2 using the SAME client ID
+        using (var client2 = new RawTcpTestClient(clientId, tcpEndPoint))
+        {
+            var (hs2, join2) = await PerformTcpHandshakeAndJoinAsync(client2, roomId);
+            Assert.True(hs2, "Reconnection Handshake failed.");
+            Assert.True(join2, "Reconnection Join room failed.");
+            
+            // Wait 500ms to ensure the old connection's cleanup task had time to run
+            await Task.Delay(500);
+            
+            // 3. Verify client2 is still alive and can send a heartbeat and receive an ACK
+            var heartbeatBytes = CreatePacket(4, roomId, clientId, 0, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            await client2.SendFramedAsync(heartbeatBytes, heartbeatBytes.Length);
+            
+            var heartbeatResponse = await client2.ReceiveFramedAsync();
+            Assert.True(heartbeatResponse.Length >= 28, "Did not receive heartbeat ACK after cleanup.");
+            Shared.Serialization.PacketSerializer.TryDeserializeHeader(heartbeatResponse, out var hbHeader);
+            Assert.Equal(4, hbHeader.PacketType);
+        }
+    }
+
     #endregion
 }

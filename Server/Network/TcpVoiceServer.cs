@@ -133,7 +133,7 @@ namespace Server.Network
             {
                 ArrayPool<byte>.Shared.Return(packetBuf);
                 if (knownClientId != -1)
-                    _roomManager.UnregisterClient(knownClientId, DateTime.UtcNow.Ticks, 0);
+                    _roomManager.UnregisterClient(knownClientId, sendChannel);
                 tcp.Dispose();
                 Console.WriteLine($"[TCP] Client {remoteEP} disconnected.");
             }

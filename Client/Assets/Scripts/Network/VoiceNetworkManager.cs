@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Client.Audio;
@@ -37,6 +38,8 @@ namespace Client.Network
         public int ClientId = 1;
         [Tooltip("Voice room to join on connect")]
         public int RoomId = 1;
+        [Tooltip("Automatically connect and join the room on Start")]
+        public bool ConnectOnStart = true;
 
         [Header("Audio")]
         public int SampleRate = 48000;
@@ -56,6 +59,13 @@ namespace Client.Network
         public State CurrentState { get; private set; } = State.Disconnected;
         public float LastRttMs    { get; private set; }
         public string ActiveProtocol => _transport?.Protocol ?? "None";
+
+        // ── Public Events ──────────────────────────────────────────────────
+        public event Action OnConnectSuccess;
+        public event Action OnConnectionFailed;
+        public event Action OnDisconnected;
+        public event Action<int> OnJoinRoomSuccess;
+        public event Action<int> OnJoinRoomFailed;
 
         // ── Internal ──────────────────────────────────────────────────────
         private IVoiceTransport _transport;
@@ -91,7 +101,10 @@ namespace Client.Network
 
         private async void Start()
         {
-            await ConnectAndJoinAsync();
+            if (ConnectOnStart)
+            {
+                await ConnectAndJoinAsync();
+            }
         }
 
         private void Update()
@@ -121,7 +134,7 @@ namespace Client.Network
             _transport.OnHandshakeAck  += OnHandshakeAck;
             _transport.OnRoomJoinAck   += OnRoomJoinAck;
             _transport.OnAudioReceived += OnAudioReceived;
-            _transport.OnDisconnected  += OnDisconnected;
+            _transport.OnDisconnected  += OnDisconnect;
             _transport.OnHeartbeatAck  += OnHeartbeatAck;
 
             _lastServerHeartbeatTimeMs = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -134,6 +147,7 @@ namespace Client.Network
                 {
                     CurrentState = State.Disconnected;
                     Debug.LogError($"[VoiceNetworkManager] Failed to connect via {Protocol}.");
+                    OnConnectionFailed?.Invoke();
                     _ = AutoReconnectAsync();
                 });
                 return;
@@ -145,6 +159,7 @@ namespace Client.Network
                 {
                     CurrentState = State.Connected;
                     SetupAudioPipeline();
+                    OnConnectSuccess?.Invoke();
                     _transport.JoinRoom(RoomId);
                 }
             });
@@ -165,6 +180,31 @@ namespace Client.Network
             Protocol   = newProtocol;
             ServerPort = newPort;
             await ConnectAndJoinAsync();
+        }
+
+        /// <summary>Requests joining a specific room. If disconnected, updates the default RoomId to join on next connection.</summary>
+        public void JoinRoom(int roomId)
+        {
+            RoomId = roomId;
+            if (CurrentState == State.Connected || CurrentState == State.InRoom)
+            {
+                _transport?.JoinRoom(roomId);
+            }
+        }
+
+        /// <summary>Leaves the current room and joins room 0 (a silent/lobby room).</summary>
+        public void LeaveRoom()
+        {
+            if (CurrentState == State.InRoom)
+            {
+                JoinRoom(0);
+            }
+        }
+
+        /// <summary>Disconnects from the server and cleans up the audio pipeline.</summary>
+        public void Disconnect()
+        {
+            TearDown();
         }
 
         // ── Audio pipeline ────────────────────────────────────────────────
@@ -198,15 +238,28 @@ namespace Client.Network
         private void OnRoomJoinAck(bool success)
         {
             _lastServerHeartbeatTimeMs = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            if (success)
+            UnityMainThreadDispatcher.Enqueue(() =>
             {
-                CurrentState = State.InRoom;
-                Debug.Log($"[VoiceNetworkManager] Joined room {RoomId} via {Protocol}.");
-            }
-            else
-            {
-                Debug.LogError($"[VoiceNetworkManager] Failed to join room {RoomId}.");
-            }
+                if (success)
+                {
+                    if (RoomId == 0)
+                    {
+                        CurrentState = State.Connected;
+                        Debug.Log($"[VoiceNetworkManager] Left room (joined silent room 0) via {Protocol}.");
+                    }
+                    else
+                    {
+                        CurrentState = State.InRoom;
+                        Debug.Log($"[VoiceNetworkManager] Joined room {RoomId} via {Protocol}.");
+                    }
+                    OnJoinRoomSuccess?.Invoke(RoomId);
+                }
+                else
+                {
+                    Debug.LogError($"[VoiceNetworkManager] Failed to join room {RoomId}.");
+                    OnJoinRoomFailed?.Invoke(RoomId);
+                }
+            });
         }
 
         private void OnAudioReceived(int senderId, byte[] opusPacket, int opusLength)
@@ -240,10 +293,18 @@ namespace Client.Network
                 _playback?.EnqueueAudio(senderId, pcm);
         }
 
-        private void OnDisconnected()
+        private void OnDisconnect()
         {
-            CurrentState = State.Disconnected;
-            Debug.LogWarning($"[VoiceNetworkManager] Disconnected from server ({Protocol}).");
+            UnityMainThreadDispatcher.Enqueue(() =>
+            {
+                bool wasConnected = (CurrentState == State.Connected || CurrentState == State.InRoom);
+                CurrentState = State.Disconnected;
+                Debug.LogWarning($"[VoiceNetworkManager] Disconnected from server ({Protocol}).");
+                if (wasConnected && !_isDestroyed)
+                {
+                    OnDisconnected?.Invoke();
+                }
+            });
         }
 
         // ── Microphone capture callback (background thread) ───────────────
@@ -273,6 +334,7 @@ namespace Client.Network
         {
             lock (_audioLock)
             {
+                bool wasConnected = (CurrentState == State.Connected || CurrentState == State.InRoom);
                 CurrentState = State.Disconnected;
                 _recorder?.StopRecording();
                 _recorder?.Dispose();
@@ -301,6 +363,11 @@ namespace Client.Network
 
                 _playback?.Dispose();
                 _playback = null;
+
+                if (wasConnected && !_isDestroyed)
+                {
+                    UnityMainThreadDispatcher.Enqueue(() => OnDisconnected?.Invoke());
+                }
             }
         }
 

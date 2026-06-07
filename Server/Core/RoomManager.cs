@@ -29,18 +29,21 @@ namespace Server.Core
 
             if (_sessions.TryGetValue(clientId, out var existing))
             {
-                string oldKey = existing.EndPoint.ToString();
-                if (oldKey != epKey)
+                lock (existing)
                 {
-                    // NAT roam or protocol reconnect — update endpoint mapping
-                    existing.EndPoint = endPoint;
-                    _endpointSessions.TryRemove(oldKey, out _);
-                    _endpointSessions[epKey] = existing;
+                    string oldKey = existing.EndPoint.ToString();
+                    if (oldKey != epKey)
+                    {
+                        // NAT roam or protocol reconnect — update endpoint mapping
+                        existing.EndPoint = endPoint;
+                        _endpointSessions.TryRemove(oldKey, out _);
+                        _endpointSessions[epKey] = existing;
+                    }
+                    if (sendChannel != null)
+                        existing.SendChannel = sendChannel;
+                    existing.LastActivityTicks = DateTime.UtcNow.Ticks;
+                    return existing;
                 }
-                if (sendChannel != null)
-                    existing.SendChannel = sendChannel;
-                existing.LastActivityTicks = DateTime.UtcNow.Ticks;
-                return existing;
             }
 
             var session = new ClientSession(clientId, endPoint, sendChannel);
@@ -71,12 +74,17 @@ namespace Server.Core
         public bool LeaveRoom(int clientId)
         {
             if (!_sessions.TryGetValue(clientId, out var session)) return false;
+            return LeaveRoom(session);
+        }
+
+        public bool LeaveRoom(ClientSession session)
+        {
             int currentRoomId = session.RoomId;
             if (currentRoomId == 0) return false;
 
             if (_rooms.TryGetValue(currentRoomId, out var room))
             {
-                room.TryRemove(clientId, out _);
+                room.TryRemove(session.ClientId, out _);
                 session.RoomId = 0;
                 if (room.ClientCount == 0) _rooms.TryRemove(currentRoomId, out _);
                 return true;
@@ -96,7 +104,31 @@ namespace Server.Core
                         _sessions.TryAdd(clientId, removed); // rollback race
                         return;
                     }
-                    LeaveRoom(clientId);
+                    LeaveRoom(removed);
+                    _endpointSessions.TryRemove(removed.EndPoint.ToString(), out _);
+                }
+            }
+        }
+
+        public void UnregisterClient(int clientId, ISendChannel? expectedChannel)
+        {
+            if (!_sessions.TryGetValue(clientId, out var session)) return;
+            
+            // Fast path check before lock
+            if (expectedChannel != null && session.SendChannel != expectedChannel)
+                return;
+
+            lock (session)
+            {
+                if (expectedChannel != null && session.SendChannel != expectedChannel)
+                {
+                    // Client has reconnected on a different channel/socket. Do not unregister.
+                    return;
+                }
+
+                if (_sessions.TryRemove(clientId, out var removed))
+                {
+                    LeaveRoom(removed);
                     _endpointSessions.TryRemove(removed.EndPoint.ToString(), out _);
                 }
             }

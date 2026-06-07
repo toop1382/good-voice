@@ -342,8 +342,9 @@ MonoBehaviour:
   Protocol: 1
   ServerHost: 127.0.0.1
   ServerPort: 50006
-  ClientId: 12
+  ClientId: 73
   RoomId: 100
+  ConnectOnStart: 1
   SampleRate: 48000
   Channels: 1
   FrameSizeInSamples: 480
@@ -374,7 +375,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e83752797d492c848980b50c9c66cad0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Client.DiagnosticsUI
-  VoiceManager: {fileID: 0}
+  VoiceManager: {fileID: 2036782592}
   ShowPanel: 1
   ToggleKey: 282
 --- !u!4 &2036782595
