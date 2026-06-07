@@ -1,0 +1,44 @@
+# =========================================================================
+# .NET / C# Build Artifacts
+# =========================================================================
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# =========================================================================
+# IDEs & Editor Configuration (VS, VS Code, Rider, JetBrains)
+# =========================================================================
+.vs/
+.idea/
+.vscode/
+*.userprefs
+*.csproj.user
+*.sql
+*.cache
+*.db
+*.suo
+*.suo.tmp
+
+# =========================================================================
+# Unity Client Project (Client/)
+# =========================================================================
+Client/[Ll]ibrary/
+Client/[Tt]emp/
+Client/[Oo]bj/
+Client/[Ll]ogs/
+Client/[Mm]emoryCaptures/
+Client/[Bb]uild/
+Client/[Bb]uilds/
+Client/[Uu]serSettings/
+Client/LocalCache/
+Client/Recordings/
+
+# =========================================================================
+# OS & System Junk
+# =========================================================================
+.DS_Store
+Thumbs.db
+desktop.ini

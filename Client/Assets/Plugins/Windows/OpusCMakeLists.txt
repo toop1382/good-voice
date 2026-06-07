@@ -1,0 +1,54 @@
+cmake_minimum_required(VERSION 3.16)
+project(UnityOpus CXX C)
+
+# -----------------------------------------------------------------------
+# Configuration
+# -----------------------------------------------------------------------
+# Set OPUS_SOURCE_DIR to the extracted opus source tree, e.g.:
+#   cmake -DOPUS_SOURCE_DIR=/path/to/opus-1.5.2 ..
+#
+# Or, with vcpkg on Windows:
+#   cmake -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake ..
+# -----------------------------------------------------------------------
+
+option(USE_VCPKG "Use vcpkg-provided opus" OFF)
+
+if(USE_VCPKG)
+    find_package(Opus CONFIG REQUIRED)
+    set(OPUS_LIB Opus::opus)
+else()
+    # Build opus from source (add as subdirectory)
+    if(NOT DEFINED OPUS_SOURCE_DIR)
+        message(FATAL_ERROR "Set -DOPUS_SOURCE_DIR=/path/to/opus or use -DUSE_VCPKG=ON")
+    endif()
+    add_subdirectory(${OPUS_SOURCE_DIR} ${CMAKE_BINARY_DIR}/opus)
+    set(OPUS_LIB opus)
+endif()
+
+# -----------------------------------------------------------------------
+# Windows DLL — UnityOpus.dll
+# -----------------------------------------------------------------------
+if(WIN32)
+    add_library(UnityOpus SHARED UnityOpusWrapper.cpp)
+    target_link_libraries(UnityOpus PRIVATE ${OPUS_LIB})
+    target_compile_options(UnityOpus PRIVATE $<$<CONFIG:Release>:/O2 /GL>)
+    set_target_properties(UnityOpus PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin/Windows/x86_64"
+    )
+    install(TARGETS UnityOpus
+        RUNTIME DESTINATION "${CMAKE_SOURCE_DIR}/../"
+    )
+endif()
+
+# -----------------------------------------------------------------------
+# Android Shared Library — libunityopus.so
+# -----------------------------------------------------------------------
+if(ANDROID)
+    add_library(unityopus SHARED UnityOpusWrapper.cpp)
+    target_link_libraries(unityopus PRIVATE ${OPUS_LIB} log)
+    target_compile_options(unityopus PRIVATE -O2 -fvisibility=hidden)
+    set_target_properties(unityopus PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY
+            "${CMAKE_SOURCE_DIR}/bin/Android/${ANDROID_ABI}"
+    )
+endif()
