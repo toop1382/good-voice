@@ -56,6 +56,18 @@ A production-grade, cross-platform (Windows + Android) voice chat system with:
 ## Quick Start
 
 ### 1. Run the Server
+**Option A — One-Click (Windows):**
+Double-click the [start_server.bat](file:///i:/projects/voice%20chat/start_server.bat) file in the root folder. This compiles and launches the voice server, hosts the interactive dashboard, and automatically opens the dashboard panel in your default browser at `http://localhost:5000/`.
+
+**Option B — Linux systemd Service (Auto-Restart Daemon):**
+To run the server permanently in the background on a Linux server and ensure it automatically restarts if it exits or crashes:
+```bash
+chmod +x install_service.sh
+./install_service.sh
+```
+This compiles the server in Release mode, deploys it to `/opt/voice-chat/`, and registers it under systemd as `voice-chat.service` with `Restart=always` enabled.
+
+**Option C — CLI (Windows/Linux/macOS):**
 ```powershell
 dotnet run --project Server -c Release -- --port 50005
 ```

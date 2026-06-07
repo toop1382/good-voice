@@ -1,0 +1,16 @@
+[Unit]
+Description=Low-Latency Voice Chat Server & Dashboard
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/voice-chat
+ExecStart=/usr/bin/dotnet /opt/voice-chat/Server.dll
+Restart=always
+RestartSec=5
+KillMode=process
+SyslogIdentifier=voice-chat-server
+Environment=ASPNETCORE_ENVIRONMENT=Production
+
+[Install]
+WantedBy=multi-user.target
