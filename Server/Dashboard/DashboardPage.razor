@@ -1,0 +1,577 @@
+@implements IDisposable
+@inject RoomManager roomManager
+
+<div class="dashboard-wrapper animated-fade-in">
+    <!-- Header -->
+    <header class="dashboard-header">
+        <div class="header-left">
+            <div class="status-indicator">
+                <span class="status-dot pulsing"></span>
+                <span class="status-text">SERVER ONLINE</span>
+            </div>
+            <h1 class="dashboard-title">Voice Chat Server Dashboard</h1>
+        </div>
+        <div class="header-right">
+            <div class="active-protocols">
+                <span class="protocol-tag udp">UDP: Running</span>
+                <span class="protocol-tag tcp">TCP: Running</span>
+                <span class="protocol-tag ws">WS: Running</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Metrics Grid -->
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-icon active-rooms">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </div>
+            <div class="metric-info">
+                <span class="metric-label">Active Rooms</span>
+                <span class="metric-value">@GetActiveRoomsCount()</span>
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-icon connected-clients">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            </div>
+            <div class="metric-info">
+                <span class="metric-label">Connected Clients</span>
+                <span class="metric-value">@GetConnectedClientsCount()</span>
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-icon active-streams">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+            </div>
+            <div class="metric-info">
+                <span class="metric-label">Active Voice Channels</span>
+                <span class="metric-value">@GetActiveSpeakersCount()</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Layout -->
+    <div class="main-layout">
+        <!-- Connections Table -->
+        <div class="layout-column main-panel">
+            <div class="panel-header">
+                <h2 class="panel-title">Active Client Sessions</h2>
+                <div class="search-box">
+                    <input type="text" placeholder="Search Client ID or Endpoint..." @bind="searchQuery" @bind:event="oninput" class="search-input" />
+                </div>
+            </div>
+            <div class="table-container">
+                <table class="dashboard-table">
+                    <thead>
+                        <tr>
+                            <th>Client ID</th>
+                            <th>Endpoint</th>
+                            <th>Protocol</th>
+                            <th>Assigned Room</th>
+                            <th>Last Activity</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @{
+                            var filteredSessions = GetFilteredSessions();
+                        }
+                        @if (filteredSessions.Count == 0)
+                        {
+                            <tr>
+                                <td colspan="6" class="empty-state">
+                                    <div class="empty-state-content">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                                        <p>No active sessions found.</p>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                        else
+                        {
+                            @foreach (var session in filteredSessions)
+                            {
+                                <tr>
+                                    <td class="client-id-cell">#@session.ClientId</td>
+                                    <td class="endpoint-cell">@session.EndPoint.ToString()</td>
+                                    <td>
+                                        <span class="protocol-badge @session.SendChannel?.Protocol.ToLower()">
+                                            @(session.SendChannel?.Protocol ?? "UDP")
+                                        </span>
+                                    </td>
+                                    <td>
+                                        @if (session.RoomId == 0)
+                                        {
+                                            <span class="room-badge lobby">Lobby (0)</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="room-badge active">Room @session.RoomId</span>
+                                        }
+                                    </td>
+                                    <td class="activity-cell">@FormatLastActive(session.LastActivityTicks)</td>
+                                    <td>
+                                        <button class="btn btn-kick" @onclick="() => KickClient(session.ClientId, session.SendChannel)">
+                                            Kick
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Rooms Sidebar -->
+        <div class="layout-column sidebar-panel">
+            <div class="panel-header">
+                <h2 class="panel-title">Active Rooms List</h2>
+            </div>
+            <div class="rooms-list-container">
+                @{
+                    var rooms = roomManager.GetAllRooms();
+                }
+                @if (rooms.Count == 0)
+                {
+                    <div class="sidebar-empty">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                        <p>No rooms currently active.</p>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var room in rooms)
+                    {
+                        <div class="room-card">
+                            <div class="room-card-header">
+                                <span class="room-title">Room #@room.RoomId</span>
+                                <span class="room-users-count">@room.ClientCount users</span>
+                            </div>
+                            <div class="room-users-list">
+                                @foreach (var client in room.Clients)
+                                {
+                                    <div class="room-user-item">
+                                        <span class="user-bullet"></span>
+                                        <span class="user-id">Client #@client.ClientId</span>
+                                        <span class="user-endpoint">(@(client.SendChannel?.Protocol ?? "UDP"))</span>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    /* Premium Dashboard Layout styling */
+    .dashboard-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 2.5rem 1.5rem;
+    }
+
+    /* Header styling */
+    .dashboard-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid #1f2538;
+        padding-bottom: 1.5rem;
+    }
+    .status-indicator {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.5rem;
+    }
+    .status-dot {
+        width: 8px;
+        height: 8px;
+        background-color: #10b981;
+        border-radius: 50%;
+        box-shadow: 0 0 8px #10b981;
+    }
+    .pulsing {
+        animation: pulse 1.8s infinite ease-in-out;
+    }
+    @@keyframes pulse {
+        0% { transform: scale(0.9); opacity: 0.6; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+        50% { transform: scale(1.1); opacity: 1; box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+        100% { transform: scale(0.9); opacity: 0.6; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+    .status-text {
+        font-size: 0.75rem;
+        font-weight: 700;
+        color: #10b981;
+        letter-spacing: 0.05em;
+    }
+    .dashboard-title {
+        font-family: 'Outfit', sans-serif;
+        font-weight: 800;
+        font-size: 2rem;
+        letter-spacing: -0.02em;
+        background: linear-gradient(135deg, #f3f4f6 0%, #9ca3af 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .active-protocols {
+        display: flex;
+        gap: 0.75rem;
+    }
+    .protocol-tag {
+        font-size: 0.75rem;
+        font-weight: 600;
+        padding: 0.35rem 0.75rem;
+        border-radius: 6px;
+        background-color: #121522;
+        border: 1px solid #202538;
+    }
+    .protocol-tag.udp { color: #6366f1; border-color: rgba(99, 102, 241, 0.3); }
+    .protocol-tag.tcp { color: #10b981; border-color: rgba(16, 185, 129, 0.3); }
+    .protocol-tag.ws { color: #ec4899; border-color: rgba(236, 72, 153, 0.3); }
+
+    /* Metrics Grid styling */
+    .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1.5rem;
+    }
+    .metric-card {
+        background-color: #121522;
+        border: 1px solid #1f2538;
+        border-radius: 14px;
+        padding: 1.75rem;
+        display: flex;
+        align-items: center;
+        gap: 1.25rem;
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .metric-card:hover {
+        transform: translateY(-3px);
+        border-color: #3f476c;
+        box-shadow: 0 8px 30px rgba(99, 102, 241, 0.1);
+    }
+    .metric-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 48px;
+        height: 48px;
+        border-radius: 10px;
+    }
+    .metric-icon.active-rooms { background-color: rgba(168, 85, 247, 0.12); color: #a855f7; }
+    .metric-icon.connected-clients { background-color: rgba(99, 102, 241, 0.12); color: #6366f1; }
+    .metric-icon.active-streams { background-color: rgba(6, 182, 212, 0.12); color: #06b6d4; }
+    
+    .metric-info {
+        display: flex;
+        flex-direction: column;
+    }
+    .metric-label {
+        font-size: 0.85rem;
+        color: #9ca3af;
+        margin-bottom: 0.15rem;
+    }
+    .metric-value {
+        font-family: 'Outfit', sans-serif;
+        font-weight: 700;
+        font-size: 1.75rem;
+        color: #f3f4f6;
+    }
+
+    /* Main Layout Grid */
+    .main-layout {
+        display: grid;
+        grid-template-columns: 2.3fr 1fr;
+        gap: 1.75rem;
+        align-items: start;
+    }
+    .layout-column {
+        background-color: #121522;
+        border: 1px solid #1f2538;
+        border-radius: 14px;
+        padding: 1.75rem;
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+    }
+    .panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+    .panel-title {
+        font-family: 'Outfit', sans-serif;
+        font-weight: 600;
+        font-size: 1.25rem;
+        color: #f3f4f6;
+    }
+
+    /* Search Input styling */
+    .search-box {
+        position: relative;
+    }
+    .search-input {
+        background-color: #080a10;
+        border: 1px solid #1f2538;
+        color: #f3f4f6;
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        width: 240px;
+        outline: none;
+        transition: all 0.2s ease;
+    }
+    .search-input:focus {
+        border-color: #6366f1;
+        box-shadow: 0 0 8px rgba(99, 102, 241, 0.2);
+    }
+
+    /* Table styling */
+    .table-container {
+        overflow-x: auto;
+    }
+    .dashboard-table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+        font-size: 0.875rem;
+    }
+    .dashboard-table th {
+        color: #9ca3af;
+        font-weight: 600;
+        border-bottom: 1px solid #1f2538;
+        padding: 0.85rem 1rem;
+    }
+    .dashboard-table td {
+        padding: 1rem;
+        border-bottom: 1px solid #1f2538;
+        color: #e5e7eb;
+    }
+    .dashboard-table tr:last-child td {
+        border-bottom: none;
+    }
+    .client-id-cell {
+        font-family: 'Outfit', sans-serif;
+        font-weight: 600;
+        color: #a855f7;
+    }
+    .endpoint-cell {
+        font-family: monospace;
+        color: #9ca3af;
+    }
+
+    /* Badges */
+    .protocol-badge {
+        font-size: 0.75rem;
+        font-weight: 700;
+        padding: 0.25rem 0.5rem;
+        border-radius: 6px;
+        text-transform: uppercase;
+    }
+    .protocol-badge.udp { background-color: rgba(99, 102, 241, 0.15); color: #818cf8; }
+    .protocol-badge.tcp { background-color: rgba(16, 185, 129, 0.15); color: #34d399; }
+    .protocol-badge.websocket { background-color: rgba(236, 72, 153, 0.15); color: #f472b6; }
+
+    .room-badge {
+        font-size: 0.75rem;
+        font-weight: 600;
+        padding: 0.25rem 0.5rem;
+        border-radius: 6px;
+    }
+    .room-badge.lobby { background-color: #1f2538; color: #9ca3af; }
+    .room-badge.active { background-color: rgba(6, 182, 212, 0.15); color: #22d3ee; }
+
+    .activity-cell {
+        color: #9ca3af;
+    }
+
+    /* Action Buttons */
+    .btn {
+        padding: 0.4rem 0.85rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        border-radius: 6px;
+        cursor: pointer;
+        border: none;
+        outline: none;
+        transition: all 0.2s ease;
+    }
+    .btn-kick {
+        background-color: rgba(239, 68, 68, 0.15);
+        color: #f87171;
+        border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    .btn-kick:hover {
+        background-color: #ef4444;
+        color: #ffffff;
+        border-color: #ef4444;
+        box-shadow: 0 4px 12px rgba(239, 68, 68, 0.35);
+    }
+
+    /* Empty state styling */
+    .empty-state {
+        text-align: center;
+    }
+    .empty-state-content {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 3rem 0;
+        gap: 0.75rem;
+        color: #6b7280;
+    }
+
+    /* Sidebar / Rooms list styling */
+    .rooms-list-container {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+    .room-card {
+        background-color: #080a10;
+        border: 1px solid #1f2538;
+        border-radius: 10px;
+        padding: 1.25rem;
+    }
+    .room-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid #1f2538;
+        padding-bottom: 0.75rem;
+        margin-bottom: 0.75rem;
+    }
+    .room-title {
+        font-family: 'Outfit', sans-serif;
+        font-weight: 600;
+        font-size: 1rem;
+        color: #22d3ee;
+    }
+    .room-users-count {
+        font-size: 0.75rem;
+        color: #9ca3af;
+    }
+    .room-users-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    .room-user-item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.8rem;
+    }
+    .user-bullet {
+        width: 6px;
+        height: 6px;
+        background-color: #a855f7;
+        border-radius: 50%;
+    }
+    .user-id {
+        color: #e5e7eb;
+        font-weight: 500;
+    }
+    .user-endpoint {
+        color: #6b7280;
+    }
+    .sidebar-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 4rem 0;
+        gap: 0.75rem;
+        color: #6b7280;
+        text-align: center;
+    }
+
+    /* Responsive scaling */
+    @@media (max-width: 1024px) {
+        .main-layout {
+            grid-template-columns: 1fr;
+        }
+        .metrics-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+@code {
+    private string searchQuery = string.Empty;
+    private System.Threading.Timer? _refreshTimer;
+
+    protected override void OnInitialized()
+    {
+        // Periodic auto-refresh every 1 second
+        _refreshTimer = new System.Threading.Timer(_ =>
+        {
+            InvokeAsync(StateHasChanged);
+        }, null, 1000, 1000);
+    }
+
+    private int GetActiveRoomsCount()
+    {
+        return roomManager.GetAllRooms().Count;
+    }
+
+    private int GetConnectedClientsCount()
+    {
+        return roomManager.GetAllSessions().Count;
+    }
+
+    private int GetActiveSpeakersCount()
+    {
+        // Clients in a room other than silent Lobby (room 0)
+        return roomManager.GetAllSessions().Count(s => s.RoomId != 0);
+    }
+
+    private List<ClientSession> GetFilteredSessions()
+    {
+        var sessions = roomManager.GetAllSessions().ToList();
+        if (string.IsNullOrWhiteSpace(searchQuery))
+        {
+            return sessions;
+        }
+
+        var q = searchQuery.Trim().ToLowerInvariant();
+        return sessions.Where(s =>
+            s.ClientId.ToString().Contains(q) ||
+            s.EndPoint.ToString().ToLowerInvariant().Contains(q)
+        ).ToList();
+    }
+
+    private string FormatLastActive(long ticks)
+    {
+        var elapsed = TimeSpan.FromTicks(DateTime.UtcNow.Ticks - ticks);
+        if (elapsed.TotalSeconds < 2) return "Just now";
+        if (elapsed.TotalSeconds < 60) return $"{(int)elapsed.TotalSeconds}s ago";
+        return $"{(int)elapsed.TotalMinutes}m ago";
+    }
+
+    private void KickClient(int clientId, ISendChannel? channel)
+    {
+        roomManager.UnregisterClient(clientId, channel);
+        // Instant visual update
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
+    }
+}

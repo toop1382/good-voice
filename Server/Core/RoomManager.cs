@@ -18,6 +18,8 @@ namespace Server.Core
         public bool TryGetRoom(int roomId, out VoiceRoom? room) =>
             _rooms.TryGetValue(roomId, out room);
 
+        public ICollection<VoiceRoom> GetAllRooms() => _rooms.Values;
+
         // ── Session management ────────────────────────────────────────────
         /// <summary>
         /// Register or refresh a client session. For UDP, called per-handshake (may move endpoint).
