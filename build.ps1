@@ -34,10 +34,10 @@ Write-Host "  .NET build OK." -ForegroundColor Green
 # --- Native DLLs (optional) ---
 if ($BuildNative) {
     Write-Host "`n[2/4] Building native Windows WASAPI DLL..." -ForegroundColor Yellow
-    $nativeDir = "$root\Client\Assets\Plugins\Windows"
+    $nativeDir = "$root\Native\Windows"
     cmake -B "$nativeDir\build" -S "$nativeDir" -DCMAKE_BUILD_TYPE=Release
     cmake --build "$nativeDir\build" --config Release
-    Copy-Item "$nativeDir\build\Release\VoiceCapture.dll" "$nativeDir\" -Force
+    Copy-Item "$nativeDir\build\Release\VoiceCapture.dll" "$root\Client\Assets\Plugins\x64\" -Force
     Write-Host "  VoiceCapture.dll built OK." -ForegroundColor Green
 } else {
     Write-Host "`n[2/4] Skipping native build (use -BuildNative to build WASAPI/Opus DLLs)." -ForegroundColor DarkGray

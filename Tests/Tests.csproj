@@ -29,7 +29,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="..\Client\Assets\Plugins\Windows\UnityOpus.dll">
+    <None Include="..\Client\Assets\Plugins\x64\UnityOpus.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

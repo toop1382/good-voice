@@ -38,11 +38,20 @@ namespace Server.Core
                     {
                         // NAT roam or protocol reconnect — update endpoint mapping
                         existing.EndPoint = endPoint;
-                        _endpointSessions.TryRemove(oldKey, out _);
-                        _endpointSessions[epKey] = existing;
+                        lock (_endpointSessions)
+                        {
+                            _endpointSessions.TryRemove(oldKey, out _);
+                            _endpointSessions[epKey] = existing;
+                        }
                     }
                     if (sendChannel != null)
+                    {
+                        if (existing.SendChannel is IDisposable oldDisposable && existing.SendChannel != sendChannel)
+                        {
+                            try { oldDisposable.Dispose(); } catch { }
+                        }
                         existing.SendChannel = sendChannel;
+                    }
                     existing.LastActivityTicks = DateTime.UtcNow.Ticks;
                     return existing;
                 }
@@ -51,7 +60,10 @@ namespace Server.Core
             var session = new ClientSession(clientId, endPoint, sendChannel);
             if (_sessions.TryAdd(clientId, session))
             {
-                _endpointSessions[epKey] = session;
+                lock (_endpointSessions)
+                {
+                    _endpointSessions[epKey] = session;
+                }
                 return session;
             }
             // Race: another thread won — recurse once to retrieve it
@@ -62,36 +74,58 @@ namespace Server.Core
         {
             joinedRoom = null;
             if (!_sessions.TryGetValue(clientId, out var session)) return false;
-            if (session.RoomId != 0) LeaveRoom(clientId);
-
-            joinedRoom = GetOrCreateRoom(roomId);
-            if (joinedRoom.TryAdd(session))
+            
+            lock (session)
             {
-                session.RoomId = roomId;
-                return true;
+                if (session.RoomId != 0) LeaveRoom(session);
+
+                joinedRoom = GetOrCreateRoom(roomId);
+                if (joinedRoom.TryAdd(session))
+                {
+                    session.RoomId = roomId;
+                    return true;
+                }
+                return false;
             }
-            return false;
         }
 
         public bool LeaveRoom(int clientId)
         {
             if (!_sessions.TryGetValue(clientId, out var session)) return false;
-            return LeaveRoom(session);
+            lock (session)
+            {
+                return LeaveRoom(session);
+            }
         }
 
         public bool LeaveRoom(ClientSession session)
         {
-            int currentRoomId = session.RoomId;
-            if (currentRoomId == 0) return false;
-
-            if (_rooms.TryGetValue(currentRoomId, out var room))
+            lock (session)
             {
-                room.TryRemove(session.ClientId, out _);
-                session.RoomId = 0;
-                if (room.ClientCount == 0) _rooms.TryRemove(currentRoomId, out _);
-                return true;
+                int currentRoomId = session.RoomId;
+                if (currentRoomId == 0) return false;
+
+                if (_rooms.TryGetValue(currentRoomId, out var room))
+                {
+                    room.TryRemove(session.ClientId, out _);
+                    session.RoomId = 0;
+                    if (room.ClientCount == 0) _rooms.TryRemove(currentRoomId, out _);
+                    return true;
+                }
+                return false;
             }
-            return false;
+        }
+
+        private void TryRemoveEndpointSession(ClientSession session)
+        {
+            string epKey = session.EndPoint.ToString();
+            lock (_endpointSessions)
+            {
+                if (_endpointSessions.TryGetValue(epKey, out var current) && current == session)
+                {
+                    _endpointSessions.TryRemove(epKey, out _);
+                }
+            }
         }
 
         public void UnregisterClient(int clientId, long currentTicks, long thresholdTicks)
@@ -99,15 +133,21 @@ namespace Server.Core
             if (!_sessions.TryGetValue(clientId, out var session)) return;
             if (currentTicks - session.LastActivityTicks > thresholdTicks)
             {
-                if (_sessions.TryRemove(clientId, out var removed))
+                lock (session)
                 {
-                    if (currentTicks - removed.LastActivityTicks <= thresholdTicks)
-                    {
-                        _sessions.TryAdd(clientId, removed); // rollback race
+                    // Re-check under lock
+                    if (currentTicks - session.LastActivityTicks <= thresholdTicks)
                         return;
+
+                    if (_sessions.TryRemove(clientId, out var removed))
+                    {
+                        LeaveRoom(removed);
+                        TryRemoveEndpointSession(removed);
+                        if (removed.SendChannel is IDisposable disposableChannel)
+                        {
+                            try { disposableChannel.Dispose(); } catch { }
+                        }
                     }
-                    LeaveRoom(removed);
-                    _endpointSessions.TryRemove(removed.EndPoint.ToString(), out _);
                 }
             }
         }
@@ -131,7 +171,11 @@ namespace Server.Core
                 if (_sessions.TryRemove(clientId, out var removed))
                 {
                     LeaveRoom(removed);
-                    _endpointSessions.TryRemove(removed.EndPoint.ToString(), out _);
+                    TryRemoveEndpointSession(removed);
+                    if (removed.SendChannel is IDisposable disposableChannel)
+                    {
+                        try { disposableChannel.Dispose(); } catch { }
+                    }
                 }
             }
         }

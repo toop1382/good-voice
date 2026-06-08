@@ -24,6 +24,7 @@ namespace Server.Network
     public class WebSocketVoiceServer : IVoiceServer
     {
         private readonly string _prefix;
+        private readonly int _port;
         private readonly RoomManager _roomManager;
         private readonly PacketRouter _packetRouter;
         private HttpListener? _httpListener;
@@ -34,6 +35,7 @@ namespace Server.Network
 
         public WebSocketVoiceServer(int port, RoomManager roomManager)
         {
+            _port = port;
             _prefix = $"http://+:{port}/voice/";
             _roomManager = roomManager;
             _packetRouter = new PacketRouter(roomManager);
@@ -44,22 +46,39 @@ namespace Server.Network
             if (_started) return;
             _started = true;
             _cts = new CancellationTokenSource();
-            _httpListener = new HttpListener();
-            _httpListener.Prefixes.Add(_prefix);
 
-            try
+            string[] prefixesToTry = new[]
             {
-                _httpListener.Start();
+                _prefix,
+                $"http://localhost:{_port}/voice/",
+                $"http://127.0.0.1:{_port}/voice/"
+            };
+
+            foreach (var prefix in prefixesToTry)
+            {
+                try
+                {
+                    _httpListener = new HttpListener();
+                    _httpListener.Prefixes.Add(prefix);
+                    _httpListener.Start();
+                    break;
+                }
+                catch (HttpListenerException ex)
+                {
+                    Console.WriteLine($"[WS] Failed to bind to prefix {prefix}: {ex.Message} (Error code: {ex.ErrorCode})");
+                    try { _httpListener?.Close(); } catch { }
+                    _httpListener = null;
+                }
             }
-            catch (HttpListenerException ex)
+
+            if (_httpListener == null)
             {
-                Console.WriteLine($"[WS] Failed to start HttpListener on {_prefix}: {ex.Message}");
-                Console.WriteLine($"[WS] Tip: run once as admin: netsh http add urlacl url={_prefix} user=Everyone");
+                Console.WriteLine("[WS] Failed to start WebSocket server on any of the prefixes.");
                 _started = false;
                 return;
             }
 
-            Console.WriteLine($"[WS] Listening on {_prefix}");
+            Console.WriteLine($"[WS] Listening on {string.Join(", ", _httpListener.Prefixes)}");
             _ = Task.Run(() => AcceptLoopAsync(_cts.Token));
         }
 

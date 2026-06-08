@@ -6,6 +6,7 @@ namespace Client.Codec
     {
         public const int maximumPacketDuration = UnityOpusLibrary.maximumPacketDuration;
 
+        private readonly object _lock = new object();
         private IntPtr decoder;
         private readonly NumChannels channels;
         private readonly float[] softclipMem;
@@ -38,25 +39,28 @@ namespace Client.Codec
             float[] pcm,
             int decodeFec = 0)
         {
-            if (decoder == IntPtr.Zero)
+            lock (_lock)
             {
-                return 0;
+                if (decoder == IntPtr.Zero)
+                {
+                    return 0;
+                }
+                var decodedLength = UnityOpusLibrary.OpusDecodeFloat(
+                    decoder,
+                    data,
+                    dataLength,
+                    pcm,
+                    pcm.Length / (int)channels,
+                    decodeFec);
+                
+                UnityOpusLibrary.OpusPcmSoftClip(
+                    pcm,
+                    decodedLength / (int)channels,
+                    channels,
+                    softclipMem);
+                
+                return decodedLength;
             }
-            var decodedLength = UnityOpusLibrary.OpusDecodeFloat(
-                decoder,
-                data,
-                dataLength,
-                pcm,
-                pcm.Length / (int)channels,
-                decodeFec);
-            
-            UnityOpusLibrary.OpusPcmSoftClip(
-                pcm,
-                decodedLength / (int)channels,
-                channels,
-                softclipMem);
-            
-            return decodedLength;
         }
 
         #region IDisposable Support
@@ -64,14 +68,17 @@ namespace Client.Codec
 
         protected virtual void Dispose(bool disposing)
         {
-            if (!disposedValue)
+            lock (_lock)
             {
-                if (decoder != IntPtr.Zero)
+                if (!disposedValue)
                 {
-                    UnityOpusLibrary.OpusDecoderDestroy(decoder);
-                    decoder = IntPtr.Zero;
+                    if (decoder != IntPtr.Zero)
+                    {
+                        UnityOpusLibrary.OpusDecoderDestroy(decoder);
+                        decoder = IntPtr.Zero;
+                    }
+                    disposedValue = true;
                 }
-                disposedValue = true;
             }
         }
 
