@@ -67,6 +67,7 @@
     <Compile Include="Assets\Scripts\Network\WebSocketVoiceTransport.cs" />
     <Compile Include="Assets\Scripts\UnityMainThreadDispatcher.cs" />
     <Compile Include="Assets\Scripts\Network\TcpVoiceTransport.cs" />
+    <Compile Include="Assets\Scripts\Audio\CircularAudioClip.cs" />
     <Compile Include="Assets\Scripts\Network\UdpVoiceClient.cs" />
     <Compile Include="Assets\Scripts\Network\IVoiceTransport.cs" />
     <Reference Include="UnityEngine">

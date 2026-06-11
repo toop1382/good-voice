@@ -325,7 +325,7 @@ namespace Client.Network
             float[] pcm = new float[FrameSizeInSamples * Channels];
             int decoded = decoder.Decode(opusPacket, opusLength, pcm);
             if (decoded > 0)
-                _playback?.EnqueueAudio(senderId, pcm);
+                _playback?.EnqueueAudio(senderId, (int)seq, pcm);
         }
 
         private void OnDisconnect()

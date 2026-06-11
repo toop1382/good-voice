@@ -7,25 +7,21 @@ namespace Client.Audio
 {
     /// <summary>
     /// Manages low-latency audio playback of received voice streams.
-    /// Each remote client gets its own looping AudioClip + AudioSource.
-    ///
-    /// Decoded PCM frames are queued from the receive thread and written into
-    /// the AudioClip ring buffer via SetData() — called from Tick() on the main thread.
-    /// This avoids the unstable PCMReaderCallback API and works on all Unity versions
-    /// and all platforms including Android.
+    /// Each remote client gets its own looping AudioClip + AudioSource,
+    /// backed by a CircularAudioClip for robust out-of-order buffer writing.
     /// </summary>
     public class AudioPlaybackManager : IDisposable
     {
         private class RemoteStream
         {
             public AudioSource Source;
-            public AudioClip   Clip;
-            public int         WriteFramePos;   // next write offset in frames
-            public int         ClipFrames;      // total capacity in frames
-            public ConcurrentQueue<float[]> FrameQueue = new();
+            public CircularAudioClip Clip;
+            public int         LatestAbsoluteIndex = -1;
+            public ConcurrentQueue<(int absoluteIndex, float[] pcm)> FrameQueue = new();
             public long        LastActivityTimeMs;
             public bool        IsActive;
             public int         LastPlayPos;     // track the last playback position for clearing silence
+            public bool        IsBuffering = true;
         }
 
         private readonly int _sampleRate;
@@ -64,13 +60,13 @@ namespace Client.Audio
         /// Queue decoded PCM audio from a remote client for playback.
         /// Thread-safe — call from the receive/decode thread.
         /// </summary>
-        public void EnqueueAudio(int clientId, float[] pcmFloats)
+        public void EnqueueAudio(int clientId, int absoluteIndex, float[] pcmFloats)
         {
             lock (_streams)
             {
                 if (_streams.TryGetValue(clientId, out var s))
                 {
-                    s.FrameQueue.Enqueue(pcmFloats);
+                    s.FrameQueue.Enqueue((absoluteIndex, pcmFloats));
                     s.LastActivityTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                     s.IsActive = true;
                 }
@@ -99,114 +95,165 @@ namespace Client.Audio
                             s.IsActive = false;
                             s.Source.Stop();
                             // Clear clip buffer with silence
-                            s.Clip.SetData(GetSilenceArray(s.ClipFrames * _channels), 0);
-                            s.WriteFramePos = 0;
+                            s.Clip.Clear();
+                            s.LatestAbsoluteIndex = -1;
                             s.LastPlayPos = 0;
+                            s.IsBuffering = true;
                             // Clear queued frames
                             while (s.FrameQueue.TryDequeue(out _)) { }
                         }
                         continue;
                     }
 
-                    if (!s.Source.isPlaying && s.IsActive)
+                    // Dequeue new frames and write them FIRST to get the most up-to-date write position
+                    if (!s.IsBuffering)
+                    {
+                        while (s.FrameQueue.TryDequeue(out var item))
+                        {
+                            s.Clip.Write(item.absoluteIndex, item.pcm);
+                            s.LatestAbsoluteIndex = item.absoluteIndex;
+                        }
+                    }
+
+                    // Fixed target delay to absorb network jitter (e.g. 8 frames = 80ms at 10ms/frame)
+                    // This provides a stable goalpost for the jitter buffer, preventing erratic pitch shifts.
+                    int targetDelay = 8 * _frameSizeInSamples;
+
+                    // Playout/Jitter Buffering state management
+                    if (s.IsBuffering)
+                    {
+                        int bufferedInQueue = s.FrameQueue.Count * _frameSizeInSamples;
+                        // Buffer at least targetDelay + 2 extra frames to absorb initial network arrival jitter
+                        int minBufferingSamples = targetDelay + 2 * _frameSizeInSamples;
+                        if (bufferedInQueue >= minBufferingSamples)
+                        {
+                            int playPos = s.Source.timeSamples;
+                            s.LastPlayPos = playPos;
+
+                            // We want to align the first frame in the queue to be targetDelay samples ahead of playPos
+                            int targetWriteSamplePos = (playPos + targetDelay) % _clipFrames;
+                            int targetLocalIndex = targetWriteSamplePos / _frameSizeInSamples;
+
+                            if (s.FrameQueue.TryPeek(out var firstItem))
+                            {
+                                s.Clip.Reset(firstItem.absoluteIndex, targetLocalIndex);
+                            }
+
+                            // Drain all accumulated audio frames into the ring buffer
+                            while (s.FrameQueue.TryDequeue(out var item))
+                            {
+                                s.Clip.Write(item.absoluteIndex, item.pcm);
+                                s.LatestAbsoluteIndex = item.absoluteIndex;
+                            }
+
+                            s.IsBuffering = false;
+                            s.Source.Play();
+                            s.Source.pitch = 1.0f;
+                        }
+                        else
+                        {
+                            // Keep buffering, do not drain queue or play yet
+                            continue;
+                        }
+                    }
+
+                    if (!s.Source.isPlaying && s.IsActive && !s.IsBuffering)
                     {
                         s.Source.Play();
                         s.LastPlayPos = s.Source.timeSamples;
                     }
 
-                    int playPos = s.Source.timeSamples;
-
-                    // 1. Clear played audio with silence to prevent repeat voice on starvation or wrap-around
-                    int samplesPlayed = (playPos - s.LastPlayPos + s.ClipFrames) % s.ClipFrames;
-                    if (samplesPlayed > 0)
-                    {
-                        int start = s.LastPlayPos;
-                        int end = playPos;
-                        if (end > start)
-                        {
-                            s.Clip.SetData(GetSilenceArray((end - start) * _channels), start);
-                        }
-                        else
-                        {
-                            int len1 = s.ClipFrames - start;
-                            s.Clip.SetData(GetSilenceArray(len1 * _channels), start);
-                            if (end > 0)
-                            {
-                                s.Clip.SetData(GetSilenceArray(end * _channels), 0);
-                            }
-                        }
-                        s.LastPlayPos = playPos;
-                    }
-
-                    // Dynamic target delay based on current frame time (FPS) to prevent stutter on low/spiky frame rates
-                    int frameSamples = (int)(Time.unscaledDeltaTime * _sampleRate);
-                    int targetDelay = Mathf.Max(3 * _frameSizeInSamples, frameSamples + 2 * _frameSizeInSamples);
+                    int playPosVal = s.Source.timeSamples;
 
                     // Calculate currently buffered samples *before* dequeuing new frames
-                    int buffered = (s.WriteFramePos - playPos + s.ClipFrames) % s.ClipFrames;
+                    int nextLocalIndex = (s.LatestAbsoluteIndex != -1)
+                        ? s.Clip.GetNormalizedIndex(s.LatestAbsoluteIndex + 1)
+                        : 0;
+                    if (nextLocalIndex < 0) nextLocalIndex = 0;
+                    int writeSamplePos = nextLocalIndex * _frameSizeInSamples;
 
-                    // Pitch scaling thresholds relative to dynamic targetDelay
-                    int critLowThreshold  = targetDelay - 2 * _frameSizeInSamples;
-                    int modLowThreshold   = targetDelay - _frameSizeInSamples;
-                    int modHighThreshold  = targetDelay + _frameSizeInSamples;
-                    int critHighThreshold = targetDelay + 3 * _frameSizeInSamples;
-                    int snapThreshold     = targetDelay + 6 * _frameSizeInSamples;
+                    int buffered = (writeSamplePos - playPosVal + _clipFrames) % _clipFrames;
 
-                    // Buffer drift/starvation management:
-                    // Only perform a hard snap if:
-                    // 1. The play pointer overtook the write pointer (starvation: buffered is very large, close to ClipFrames).
-                    // 2. The buffer level is too large (lag: buffered is > snapThreshold).
-                    if (buffered > s.ClipFrames - _frameSizeInSamples || buffered > snapThreshold)
+                    // Starvation detection:
+                    // If play position catches up to (or overtakes) the write position, we enter buffering state.
+                    bool starved = (buffered < _frameSizeInSamples / 2) || (buffered > _clipFrames - _frameSizeInSamples);
+                    if (starved)
                     {
-                        int newWritePos = (playPos + targetDelay) % s.ClipFrames;
-                        int start = playPos;
+                        s.Source.Pause();
+                        s.IsBuffering = true;
+                        s.Clip.Clear();
+                        s.LatestAbsoluteIndex = -1;
+                        continue;
+                    }
+
+                    // Pitch scaling and hard snap thresholds relative to targetDelay
+                    int critLowThreshold  = targetDelay - 4 * _frameSizeInSamples;
+                    int modLowThreshold   = targetDelay - 2 * _frameSizeInSamples;
+                    int modHighThreshold  = targetDelay + 2 * _frameSizeInSamples;
+                    int critHighThreshold = targetDelay + 4 * _frameSizeInSamples;
+                    int snapThreshold     = targetDelay + 10 * _frameSizeInSamples;
+
+                    // Lag correction (hard snap):
+                    // If latency builds up too high (lag > snapThreshold), bring the write pointer back close to the playhead.
+                    if (buffered > snapThreshold)
+                    {
+                        int newWritePos = (playPosVal + targetDelay) % _clipFrames;
+
+                        // Clear the gap between the playhead and the new write pointer with silence
+                        int start = playPosVal;
                         int end = newWritePos;
                         if (end > start)
                         {
-                            s.Clip.SetData(GetSilenceArray((end - start) * _channels), start);
+                            s.Clip.AudioClip.SetData(GetSilenceArray((end - start) * _channels), start);
                         }
                         else
                         {
-                            int len1 = s.ClipFrames - start;
-                            s.Clip.SetData(GetSilenceArray(len1 * _channels), start);
+                            int len1 = _clipFrames - start;
+                            s.Clip.AudioClip.SetData(GetSilenceArray(len1 * _channels), start);
                             if (end > 0)
                             {
-                                s.Clip.SetData(GetSilenceArray(end * _channels), 0);
+                                s.Clip.AudioClip.SetData(GetSilenceArray(end * _channels), 0);
                             }
                         }
-                        s.WriteFramePos = newWritePos;
+
+                        // Align the next frame to newWritePos
+                        int targetLocalIndex = newWritePos / _frameSizeInSamples;
+                        if (s.FrameQueue.TryPeek(out var nextItem))
+                        {
+                            s.Clip.Reset(nextItem.absoluteIndex, targetLocalIndex);
+                        }
+                        else if (s.LatestAbsoluteIndex != -1)
+                        {
+                            s.Clip.Reset(s.LatestAbsoluteIndex + 1, targetLocalIndex);
+                        }
+
                         s.Source.pitch = 1.0f;
+                        buffered = targetDelay;
                     }
                     else if (buffered < critLowThreshold)
                     {
-                        // Critically low buffer: slow down significantly (4%) to allow recovery
-                        s.Source.pitch = 0.96f;
+                        // Critically low buffer: slow down slightly to allow recovery
+                        s.Source.pitch = 0.98f;
                     }
                     else if (buffered < modLowThreshold)
                     {
-                        // Moderately low buffer: slow down gently (2%)
-                        s.Source.pitch = 0.98f;
+                        // Moderately low buffer: slow down gently
+                        s.Source.pitch = 0.99f;
                     }
                     else if (buffered > critHighThreshold)
                     {
-                        // Critically high buffer: speed up significantly (4%) to drain latency
-                        s.Source.pitch = 1.04f;
+                        // Critically high buffer: speed up slightly to drain latency
+                        s.Source.pitch = 1.02f;
                     }
                     else if (buffered > modHighThreshold)
                     {
-                        // Moderately high buffer: speed up gently (2%)
-                        s.Source.pitch = 1.02f;
+                        // Moderately high buffer: speed up gently
+                        s.Source.pitch = 1.01f;
                     }
                     else
                     {
                         // Ideal buffer range: play at normal speed
                         s.Source.pitch = 1.0f;
-                    }
-
-                    while (s.FrameQueue.TryDequeue(out float[] frame))
-                    {
-                        s.Clip.SetData(frame, s.WriteFramePos);
-                        s.WriteFramePos = (s.WriteFramePos + _frameSizeInSamples) % s.ClipFrames;
                     }
                 }
             }
@@ -228,32 +275,32 @@ namespace Client.Audio
                 source.spatialBlend = 0f; // 2D (non-spatial) voice
                 source.loop         = true;
                 source.volume       = 1f;
+                source.priority     = 0;  // Highest priority to prevent being stolen by sound effects
 
-                // Non-streaming looping clip — AudioClip.Create(name, samples, channels, freq, stream=false)
-                // stream=false is universally supported; we manage the ring buffer ourselves via SetData.
-                var clip = AudioClip.Create(
-                    $"VoiceClip_{clientId}",
-                    _clipFrames,
-                    _channels,
+                // Circular audio clip wraps the Unity AudioClip to handle out-of-order writes
+                var circularClip = new CircularAudioClip(
                     _sampleRate,
-                    false
+                    _channels,
+                    _frameSizeInSamples * _channels, // segDataLen (total floats)
+                    _clipFrames / _frameSizeInSamples, // segCount
+                    $"VoiceClip_{clientId}"
                 );
 
                 // Pre-fill with silence so Play() doesn't pop
-                clip.SetData(new float[_clipFrames * _channels], 0);
+                circularClip.Clear();
 
-                source.clip = clip;
-                source.Play();
+                source.clip = circularClip.AudioClip;
+                source.Pause();
 
                 _streams[clientId] = new RemoteStream
                 {
                     Source        = source,
-                    Clip          = clip,
-                    WriteFramePos = 0,
-                    ClipFrames    = _clipFrames,
+                    Clip          = circularClip,
+                    LatestAbsoluteIndex = -1,
                     LastActivityTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                     IsActive      = true,
                     LastPlayPos   = 0,
+                    IsBuffering   = true,
                 };
 
                 Debug.Log($"[AudioPlaybackManager] Added playback stream for client {clientId}");
