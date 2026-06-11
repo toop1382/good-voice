@@ -14,7 +14,7 @@ namespace MockClient
 
         static async Task Main(string[] args)
         {
-            string serverIp = "127.0.0.1";
+            string serverIp = "194.33.105.209";
             int serverPort = 50005;
             int totalClients = 10;
             int totalRooms = 2;

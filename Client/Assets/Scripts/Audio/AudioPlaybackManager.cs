@@ -25,6 +25,7 @@ namespace Client.Audio
             public ConcurrentQueue<float[]> FrameQueue = new();
             public long        LastActivityTimeMs;
             public bool        IsActive;
+            public int         LastPlayPos;     // track the last playback position for clearing silence
         }
 
         private readonly int _sampleRate;
@@ -34,6 +35,17 @@ namespace Client.Audio
         private readonly Transform _audioParent;
 
         private readonly Dictionary<int, RemoteStream> _streams = new();
+        private readonly Dictionary<int, float[]> _silenceArrays = new();
+
+        private float[] GetSilenceArray(int length)
+        {
+            if (!_silenceArrays.TryGetValue(length, out var array))
+            {
+                array = new float[length];
+                _silenceArrays[length] = array;
+            }
+            return array;
+        }
 
         /// <param name="sampleRate">e.g. 48000</param>
         /// <param name="channels">1 = mono</param>
@@ -87,8 +99,9 @@ namespace Client.Audio
                             s.IsActive = false;
                             s.Source.Stop();
                             // Clear clip buffer with silence
-                            s.Clip.SetData(new float[s.ClipFrames * _channels], 0);
+                            s.Clip.SetData(GetSilenceArray(s.ClipFrames * _channels), 0);
                             s.WriteFramePos = 0;
+                            s.LastPlayPos = 0;
                             // Clear queued frames
                             while (s.FrameQueue.TryDequeue(out _)) { }
                         }
@@ -96,23 +109,97 @@ namespace Client.Audio
                     }
 
                     if (!s.Source.isPlaying && s.IsActive)
+                    {
                         s.Source.Play();
+                        s.LastPlayPos = s.Source.timeSamples;
+                    }
 
                     int playPos = s.Source.timeSamples;
-                    int targetDelay = 3 * _frameSizeInSamples; // Jitter buffer delay (e.g. 30ms)
+
+                    // 1. Clear played audio with silence to prevent repeat voice on starvation or wrap-around
+                    int samplesPlayed = (playPos - s.LastPlayPos + s.ClipFrames) % s.ClipFrames;
+                    if (samplesPlayed > 0)
+                    {
+                        int start = s.LastPlayPos;
+                        int end = playPos;
+                        if (end > start)
+                        {
+                            s.Clip.SetData(GetSilenceArray((end - start) * _channels), start);
+                        }
+                        else
+                        {
+                            int len1 = s.ClipFrames - start;
+                            s.Clip.SetData(GetSilenceArray(len1 * _channels), start);
+                            if (end > 0)
+                            {
+                                s.Clip.SetData(GetSilenceArray(end * _channels), 0);
+                            }
+                        }
+                        s.LastPlayPos = playPos;
+                    }
+
+                    // Dynamic target delay based on current frame time (FPS) to prevent stutter on low/spiky frame rates
+                    int frameSamples = (int)(Time.unscaledDeltaTime * _sampleRate);
+                    int targetDelay = Mathf.Max(3 * _frameSizeInSamples, frameSamples + 2 * _frameSizeInSamples);
 
                     // Calculate currently buffered samples *before* dequeuing new frames
                     int buffered = (s.WriteFramePos - playPos + s.ClipFrames) % s.ClipFrames;
 
+                    // Pitch scaling thresholds relative to dynamic targetDelay
+                    int critLowThreshold  = targetDelay - 2 * _frameSizeInSamples;
+                    int modLowThreshold   = targetDelay - _frameSizeInSamples;
+                    int modHighThreshold  = targetDelay + _frameSizeInSamples;
+                    int critHighThreshold = targetDelay + 3 * _frameSizeInSamples;
+                    int snapThreshold     = targetDelay + 6 * _frameSizeInSamples;
+
                     // Buffer drift/starvation management:
-                    // If buffer is too small (< 1 frame / 10ms) or too large (> 20 frames / 200ms), snap write position
-                    if (buffered < _frameSizeInSamples || buffered > 20 * _frameSizeInSamples)
+                    // Only perform a hard snap if:
+                    // 1. The play pointer overtook the write pointer (starvation: buffered is very large, close to ClipFrames).
+                    // 2. The buffer level is too large (lag: buffered is > snapThreshold).
+                    if (buffered > s.ClipFrames - _frameSizeInSamples || buffered > snapThreshold)
                     {
-                        s.WriteFramePos = (playPos + targetDelay) % s.ClipFrames;
+                        int newWritePos = (playPos + targetDelay) % s.ClipFrames;
+                        int start = playPos;
+                        int end = newWritePos;
+                        if (end > start)
+                        {
+                            s.Clip.SetData(GetSilenceArray((end - start) * _channels), start);
+                        }
+                        else
+                        {
+                            int len1 = s.ClipFrames - start;
+                            s.Clip.SetData(GetSilenceArray(len1 * _channels), start);
+                            if (end > 0)
+                            {
+                                s.Clip.SetData(GetSilenceArray(end * _channels), 0);
+                            }
+                        }
+                        s.WriteFramePos = newWritePos;
                         s.Source.pitch = 1.0f;
+                    }
+                    else if (buffered < critLowThreshold)
+                    {
+                        // Critically low buffer: slow down significantly (4%) to allow recovery
+                        s.Source.pitch = 0.96f;
+                    }
+                    else if (buffered < modLowThreshold)
+                    {
+                        // Moderately low buffer: slow down gently (2%)
+                        s.Source.pitch = 0.98f;
+                    }
+                    else if (buffered > critHighThreshold)
+                    {
+                        // Critically high buffer: speed up significantly (4%) to drain latency
+                        s.Source.pitch = 1.04f;
+                    }
+                    else if (buffered > modHighThreshold)
+                    {
+                        // Moderately high buffer: speed up gently (2%)
+                        s.Source.pitch = 1.02f;
                     }
                     else
                     {
+                        // Ideal buffer range: play at normal speed
                         s.Source.pitch = 1.0f;
                     }
 
@@ -166,6 +253,7 @@ namespace Client.Audio
                     ClipFrames    = _clipFrames,
                     LastActivityTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                     IsActive      = true,
+                    LastPlayPos   = 0,
                 };
 
                 Debug.Log($"[AudioPlaybackManager] Added playback stream for client {clientId}");

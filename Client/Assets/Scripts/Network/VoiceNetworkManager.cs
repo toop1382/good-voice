@@ -59,6 +59,7 @@ namespace Client.Network
         public State CurrentState { get; private set; } = State.Disconnected;
         public float LastRttMs    { get; private set; }
         public string ActiveProtocol => _transport?.Protocol ?? "None";
+        public DiagnosticsCollector Diagnostics => _diagnostics;
 
         // ── Public Events ──────────────────────────────────────────────────
         public event Action OnConnectSuccess;
@@ -97,6 +98,9 @@ namespace Client.Network
                 go.AddComponent<UnityMainThreadDispatcher>();
                 Debug.Log("[VoiceNetworkManager] Automatically created UnityMainThreadDispatcher.");
             }
+
+            // Automatically attach the runtime debug UI
+            gameObject.AddComponent<VoiceChatDebugUI>();
         }
 
         private async void Start()
@@ -109,6 +113,15 @@ namespace Client.Network
 
         private void Update()
         {
+            // If connected but audio pipeline is not initialized yet (e.g. waiting for Android permission), setup now
+            if ((CurrentState == State.Connected || CurrentState == State.InRoom) && _recorder == null)
+            {
+                SetupAudioPipeline();
+            }
+
+            // Tick diagnostics to compute bandwidth
+            _diagnostics?.Tick();
+
             // Drain queued decoded PCM frames into AudioClip ring buffers.
             // AudioPlaybackManager.Tick() must run on the Unity main thread.
             _playback?.Tick();
@@ -210,6 +223,16 @@ namespace Client.Network
         // ── Audio pipeline ────────────────────────────────────────────────
         private void SetupAudioPipeline()
         {
+            if (_recorder != null) return; // Already initialized
+
+#if UNITY_ANDROID
+            if (!UnityEngine.Android.Permission.HasUserAuthorizedPermission(UnityEngine.Android.Permission.Microphone))
+            {
+                Debug.LogWarning("[VoiceNetworkManager] Microphone permission not authorized yet. Setup postponed.");
+                return;
+            }
+#endif
+
             _encoder = new OpusEncoder(
                 (SamplingFrequency)SampleRate, (NumChannels)Channels, OpusApplication.VoIP);
             _encoder.Bitrate    = 24000;
@@ -222,6 +245,18 @@ namespace Client.Network
                 SampleRate, Channels, FrameSizeInSamples, EnableAndroidAEC, EnableAndroidNS, EnableAndroidAGC);
             _recorder.OnAudioFrameCaptured += OnAudioFrameCaptured;
             _recorder.StartRecording();
+
+            if (!_recorder.IsRecording)
+            {
+                Debug.LogError("[VoiceNetworkManager] Failed to start voice recording. Cleaning up to retry.");
+                _recorder.Dispose();
+                _recorder = null;
+                _encoder?.Dispose();
+                _encoder = null;
+                _playback?.Dispose();
+                _playback = null;
+                return;
+            }
 
             Debug.Log($"[VoiceNetworkManager] Audio pipeline ready (protocol={Protocol}).");
         }

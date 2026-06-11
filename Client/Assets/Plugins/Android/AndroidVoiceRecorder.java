@@ -9,6 +9,9 @@ import android.media.audiofx.AutomaticGainControl;
 import android.util.Log;
 
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
 
 /**
  * Low-latency Android voice recorder using AudioRecord API.
@@ -36,6 +39,10 @@ public class AndroidVoiceRecorder {
     // Short buffer for reading from AudioRecord (16-bit PCM)
     private final short[] shortBuffer;
 
+    // Expose direct byte buffer to C# to copy directly and save JNI allocations
+    public final ByteBuffer byteBuffer;
+    private final FloatBuffer floatBuffer;
+
     private AcousticEchoCanceler aec;
     private NoiseSuppressor ns;
     private AutomaticGainControl agc;
@@ -61,6 +68,9 @@ public class AndroidVoiceRecorder {
                 : AudioFormat.CHANNEL_IN_STEREO;
         this.frameSizeInSamples = frameSizeInSamples;
         this.shortBuffer = new short[frameSizeInSamples * channels];
+        this.byteBuffer = ByteBuffer.allocateDirect(frameSizeInSamples * channels * 4); // 4 bytes per float
+        this.byteBuffer.order(ByteOrder.nativeOrder());
+        this.floatBuffer = this.byteBuffer.asFloatBuffer();
         this.enableAec = enableAec;
         this.enableNs = enableNs;
         this.enableAgc = enableAgc;
@@ -90,69 +100,93 @@ public class AndroidVoiceRecorder {
         // Use at least 4x the min buffer for safety, but keep it small for low latency
         int bufferSize = Math.max(minBufSize * 2, frameSizeInSamples * channels * 2 * 4);
 
-        audioRecord = new AudioRecord(
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION, // Best for VoIP: AEC/NS enabled
-                sampleRate,
-                channelConfig,
-                AudioFormat.ENCODING_PCM_16BIT,
-                bufferSize
-        );
+        // Try VOICE_COMMUNICATION source first (standard for VoIP with hardware AEC/NS/AGC)
+        boolean success = tryInitializeAndStart(MediaRecorder.AudioSource.VOICE_COMMUNICATION, bufferSize);
+        if (!success) {
+            Log.w(TAG, "VOICE_COMMUNICATION failed to start. Falling back to MIC audio source.");
+            success = tryInitializeAndStart(MediaRecorder.AudioSource.MIC, bufferSize);
+        }
 
-        if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
-            Log.e(TAG, "AudioRecord failed to initialize.");
-            audioRecord.release();
-            audioRecord = null;
+        if (success) {
+            recording.set(true);
+            Log.i(TAG, "AudioRecord started successfully.");
+            return true;
+        } else {
+            Log.e(TAG, "All AudioRecord sources failed to start.");
             return false;
         }
+    }
 
-        int audioSessionId = audioRecord.getAudioSessionId();
+    private boolean tryInitializeAndStart(int source, int bufferSize) {
+        try {
+            audioRecord = new AudioRecord(
+                    source,
+                    sampleRate,
+                    channelConfig,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    bufferSize
+            );
 
-        if (enableAec && AcousticEchoCanceler.isAvailable()) {
-            try {
-                aec = AcousticEchoCanceler.create(audioSessionId);
-                if (aec != null) {
-                    aec.setEnabled(true);
-                    Log.i(TAG, "Explicitly enabled AcousticEchoCanceler.");
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "Failed to enable AcousticEchoCanceler: " + e.getMessage());
+            if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
+                Log.w(TAG, "AudioRecord failed to initialize for source " + source);
+                audioRecord.release();
+                audioRecord = null;
+                return false;
             }
-        } else {
-            Log.i(TAG, "AcousticEchoCanceler not requested or not available.");
-        }
 
-        if (enableNs && NoiseSuppressor.isAvailable()) {
-            try {
-                ns = NoiseSuppressor.create(audioSessionId);
-                if (ns != null) {
-                    ns.setEnabled(true);
-                    Log.i(TAG, "Explicitly enabled NoiseSuppressor.");
+            int audioSessionId = audioRecord.getAudioSessionId();
+
+            // Only attempt JNI hardware effects if using VOICE_COMMUNICATION source
+            if (source == MediaRecorder.AudioSource.VOICE_COMMUNICATION) {
+                if (enableAec && AcousticEchoCanceler.isAvailable()) {
+                    try {
+                        aec = AcousticEchoCanceler.create(audioSessionId);
+                        if (aec != null) {
+                            aec.setEnabled(true);
+                            Log.i(TAG, "Explicitly enabled AcousticEchoCanceler.");
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to enable AcousticEchoCanceler: " + e.getMessage());
+                    }
                 }
-            } catch (Exception e) {
-                Log.e(TAG, "Failed to enable NoiseSuppressor: " + e.getMessage());
-            }
-        } else {
-            Log.i(TAG, "NoiseSuppressor not requested or not available.");
-        }
 
-        if (enableAgc && AutomaticGainControl.isAvailable()) {
-            try {
-                agc = AutomaticGainControl.create(audioSessionId);
-                if (agc != null) {
-                    agc.setEnabled(true);
-                    Log.i(TAG, "Explicitly enabled AutomaticGainControl.");
+                if (enableNs && NoiseSuppressor.isAvailable()) {
+                    try {
+                        ns = NoiseSuppressor.create(audioSessionId);
+                        if (ns != null) {
+                            ns.setEnabled(true);
+                            Log.i(TAG, "Explicitly enabled NoiseSuppressor.");
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to enable NoiseSuppressor: " + e.getMessage());
+                    }
                 }
-            } catch (Exception e) {
-                Log.e(TAG, "Failed to enable AutomaticGainControl: " + e.getMessage());
-            }
-        } else {
-            Log.i(TAG, "AutomaticGainControl not requested or not available.");
-        }
 
-        audioRecord.startRecording();
-        recording.set(true);
-        Log.i(TAG, "AudioRecord started: " + sampleRate + "Hz, ch=" + channels + ", buf=" + bufferSize);
-        return true;
+                if (enableAgc && AutomaticGainControl.isAvailable()) {
+                    try {
+                        agc = AutomaticGainControl.create(audioSessionId);
+                        if (agc != null) {
+                            agc.setEnabled(true);
+                            Log.i(TAG, "Explicitly enabled AutomaticGainControl.");
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to enable AutomaticGainControl: " + e.getMessage());
+                    }
+                }
+            }
+
+            audioRecord.startRecording();
+            Log.i(TAG, "AudioRecord started: source=" + source + ", rate=" + sampleRate + "Hz, ch=" + channels + ", buf=" + bufferSize);
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "Exception during AudioRecord startup for source " + source + ": " + e.getMessage());
+            if (audioRecord != null) {
+                try { audioRecord.release(); } catch (Exception ex) {}
+                audioRecord = null;
+            }
+            releaseEffects();
+            return false;
+        }
     }
 
     /**
@@ -183,6 +217,30 @@ public class AndroidVoiceRecorder {
     }
 
     /**
+     * Read one frame of audio directly into the internal floatBuffer.
+     * C# will copy it using low-level JNI.
+     */
+    public int readSamples(int frameSize) {
+        if (!recording.get() || audioRecord == null) return -1;
+
+        int totalSamples = frameSize * channels;
+        int read = audioRecord.read(shortBuffer, 0, totalSamples);
+
+        if (read < 0) {
+            Log.e(TAG, "AudioRecord.read() error: " + read);
+            return -1;
+        }
+
+        // Convert short PCM [-32768, 32767] → float PCM [-1.0, 1.0] and write to direct buffer
+        floatBuffer.clear();
+        for (int i = 0; i < read; i++) {
+            floatBuffer.put(shortBuffer[i] / 32768.0f);
+        }
+
+        return read / channels; // Return frames read
+    }
+
+    /**
      * Stop recording and release resources.
      */
     public void stopRecording() {
@@ -196,8 +254,7 @@ public class AndroidVoiceRecorder {
     /**
      * Release the AudioRecord object. Call after stopRecording().
      */
-    public void release() {
-        stopRecording();
+    private void releaseEffects() {
         if (aec != null) {
             try { aec.release(); } catch (Exception e) {}
             aec = null;
@@ -210,6 +267,11 @@ public class AndroidVoiceRecorder {
             try { agc.release(); } catch (Exception e) {}
             agc = null;
         }
+    }
+
+    public void release() {
+        stopRecording();
+        releaseEffects();
         if (audioRecord != null) {
             audioRecord.release();
             audioRecord = null;

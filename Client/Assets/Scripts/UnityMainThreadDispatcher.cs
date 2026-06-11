@@ -1,6 +1,12 @@
 using System;
 using System.Collections.Concurrent;
 using UnityEngine;
+using UnityEngine.Networking;
+using Action = System.Action;
+using Application = UnityEngine.Application;
+#if UNITY_ANDROID
+using Permission = UnityEngine.Android.Permission;
+#endif
 
 namespace Client
 {
@@ -16,6 +22,15 @@ namespace Client
 
         private void Awake()
         {
+            var uni = UnityWebRequest.Get("google.com");
+            uni.SendWebRequest();
+            Application.targetFrameRate = 60;
+#if UNITY_ANDROID
+            if (!Permission.HasUserAuthorizedPermission(Permission.Microphone))
+            {
+                Permission.RequestUserPermission(Permission.Microphone);
+            }
+#endif
             if (_instance == null)
             {
                 _instance = this;

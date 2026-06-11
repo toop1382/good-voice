@@ -1,0 +1,1 @@
+C:\Users\toop\RiderProjects\good-voice\Client\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\build\intermediates\cxx\RelWithDebInfo\654g59t5\obj\arm64-v8a

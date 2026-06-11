@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using UnityEngine;
+using Unity.Collections;
 
 namespace Client.Audio
 {
@@ -22,6 +23,9 @@ namespace Client.Audio
         private Thread _readThread;
         private CancellationTokenSource _cts;
         private float[] _readBuffer;
+        private IntPtr _directBufferGlobalRef = IntPtr.Zero;
+        private NativeArray<byte> _directByteBuffer;
+        private NativeArray<float> _directFloatBuffer;
 
         private readonly bool _enableAec;
         private readonly bool _enableNs;
@@ -64,6 +68,29 @@ namespace Client.Audio
                 _javaRecorder = null;
                 return;
             }
+
+            try
+            {
+                IntPtr classRaw = _javaRecorder.GetRawClass();
+                IntPtr fieldId = AndroidJNI.GetFieldID(classRaw, "byteBuffer", "Ljava/nio/ByteBuffer;");
+                IntPtr localRef = AndroidJNI.GetObjectField(_javaRecorder.GetRawObject(), fieldId);
+                _directBufferGlobalRef = AndroidJNI.NewGlobalRef(localRef);
+                AndroidJNI.DeleteLocalRef(localRef);
+
+                _directByteBuffer = AndroidJNI.GetDirectByteBuffer(_directBufferGlobalRef);
+                if (!_directByteBuffer.IsCreated)
+                {
+                    throw new InvalidOperationException("Failed to get direct byte buffer.");
+                }
+                _directFloatBuffer = _directByteBuffer.Reinterpret<float>(1);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AndroidRecorderBridge] Failed to acquire JNI direct buffer: {ex.Message}");
+                _javaRecorder.Dispose();
+                _javaRecorder = null;
+                return;
+            }
 #else
             Debug.LogWarning("[AndroidRecorderBridge] Running outside Android — no audio will be captured.");
 #endif
@@ -91,6 +118,14 @@ namespace Client.Audio
             _javaRecorder?.Call("release");
             _javaRecorder?.Dispose();
             _javaRecorder = null;
+
+            if (_directBufferGlobalRef != IntPtr.Zero)
+            {
+                AndroidJNI.DeleteGlobalRef(_directBufferGlobalRef);
+                _directBufferGlobalRef = IntPtr.Zero;
+                _directByteBuffer = default;
+                _directFloatBuffer = default;
+            }
 #endif
             Debug.Log("[AndroidRecorderBridge] Android audio capture stopped.");
         }
@@ -103,11 +138,23 @@ namespace Client.Audio
             {
 #if UNITY_ANDROID && !UNITY_EDITOR
                 var recorder = _javaRecorder;
-                if (recorder == null) break;
+                if (recorder == null || !_directFloatBuffer.IsCreated) break;
 
-                int framesRead = recorder.Call<int>("readSamples", _readBuffer, _frameSizeInSamples);
+                int framesRead = recorder.Call<int>("readSamples", _frameSizeInSamples);
                 if (framesRead > 0)
                 {
+                    int samplesCount = framesRead * Channels;
+                    if (samplesCount == _readBuffer.Length)
+                    {
+                        _directFloatBuffer.CopyTo(_readBuffer);
+                    }
+                    else if (samplesCount > 0)
+                    {
+                        var slice = new NativeSlice<float>(_directFloatBuffer, 0, samplesCount);
+                        float[] tempBuffer = new float[samplesCount];
+                        slice.CopyTo(tempBuffer);
+                        Array.Copy(tempBuffer, 0, _readBuffer, 0, samplesCount);
+                    }
                     OnAudioFrameCaptured?.Invoke(_readBuffer);
                 }
                 else if (framesRead < 0)

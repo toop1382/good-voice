@@ -13,11 +13,23 @@ public class ServerFixture : IDisposable
 
     public ServerFixture()
     {
-        // Locate server project path relative to output directory (Tests/bin/Debug/net8.0)
+        // Locate server project path relative to output directory
         string serverProjDir = Path.Combine(AppContext.BaseDirectory, "../../../../Server");
         string serverExeName = "Server.exe"; // Windows executable
 
-        string serverPath = Path.Combine(serverProjDir, "bin/Debug/net8.0", serverExeName);
+        // Dynamically detect build configuration (Release or Debug)
+        string config = AppContext.BaseDirectory.Contains("Release") ? "Release" : "Debug";
+        string serverPath = Path.Combine(serverProjDir, $"bin/{config}/net10.0", serverExeName);
+
+        if (!File.Exists(serverPath))
+        {
+            string otherConfig = config == "Release" ? "Debug" : "Release";
+            string fallbackPath = Path.Combine(serverProjDir, $"bin/{otherConfig}/net10.0", serverExeName);
+            if (File.Exists(fallbackPath))
+            {
+                serverPath = fallbackPath;
+            }
+        }
 
         if (!File.Exists(serverPath))
         {
@@ -28,7 +40,7 @@ public class ServerFixture : IDisposable
                 var buildInfo = new ProcessStartInfo
                 {
                     FileName = "dotnet",
-                    Arguments = $"build \"{serverCsproj}\" -c Debug",
+                    Arguments = $"build \"{serverCsproj}\" -c {config}",
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     RedirectStandardOutput = true
@@ -43,7 +55,7 @@ public class ServerFixture : IDisposable
             var startInfo = new ProcessStartInfo
             {
                 FileName = serverPath,
-                Arguments = "--port 5000",
+                Arguments = "--port 5000 --no-dashboard",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
@@ -52,14 +64,14 @@ public class ServerFixture : IDisposable
 
             ServerProcess = Process.Start(startInfo) ?? throw new Exception("Failed to start server process.");
 
-            // Suppress buffer hangs by reading streams
-            ServerProcess.OutputDataReceived += (s, e) => { };
-            ServerProcess.ErrorDataReceived += (s, e) => { };
+            // Print server output to assist diagnostics
+            ServerProcess.OutputDataReceived += (s, e) => { if (e.Data != null) Console.WriteLine("[Server stdout] " + e.Data); };
+            ServerProcess.ErrorDataReceived += (s, e) => { if (e.Data != null) Console.WriteLine("[Server stderr] " + e.Data); };
             ServerProcess.BeginOutputReadLine();
             ServerProcess.BeginErrorReadLine();
 
             // Give socket binding time
-            Thread.Sleep(1000);
+            Thread.Sleep(2000);
         }
     }
 

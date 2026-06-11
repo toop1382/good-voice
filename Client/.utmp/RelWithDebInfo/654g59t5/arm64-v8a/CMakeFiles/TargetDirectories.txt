@@ -1,0 +1,8 @@
+C:/Users/toop/RiderProjects/good-voice/Client/.utmp/RelWithDebInfo/654g59t5/arm64-v8a/CMakeFiles/edit_cache.dir
+C:/Users/toop/RiderProjects/good-voice/Client/.utmp/RelWithDebInfo/654g59t5/arm64-v8a/CMakeFiles/rebuild_cache.dir
+C:/Users/toop/RiderProjects/good-voice/Client/.utmp/RelWithDebInfo/654g59t5/arm64-v8a/GameActivity/CMakeFiles/game.dir
+C:/Users/toop/RiderProjects/good-voice/Client/.utmp/RelWithDebInfo/654g59t5/arm64-v8a/GameActivity/CMakeFiles/edit_cache.dir
+C:/Users/toop/RiderProjects/good-voice/Client/.utmp/RelWithDebInfo/654g59t5/arm64-v8a/GameActivity/CMakeFiles/rebuild_cache.dir
+C:/Users/toop/RiderProjects/good-voice/Client/.utmp/RelWithDebInfo/654g59t5/arm64-v8a/FramePacing/CMakeFiles/swappywrapper.dir
+C:/Users/toop/RiderProjects/good-voice/Client/.utmp/RelWithDebInfo/654g59t5/arm64-v8a/FramePacing/CMakeFiles/edit_cache.dir
+C:/Users/toop/RiderProjects/good-voice/Client/.utmp/RelWithDebInfo/654g59t5/arm64-v8a/FramePacing/CMakeFiles/rebuild_cache.dir
