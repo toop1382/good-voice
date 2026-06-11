@@ -111,11 +111,32 @@ namespace Client.Audio
             if (!IsRecording) return;
             IsRecording = false;
             _cts?.Cancel();
-            _readThread?.Join(500);
 
 #if UNITY_ANDROID && !UNITY_EDITOR
-            _javaRecorder?.Call("stopRecording");
-            _javaRecorder?.Call("release");
+            // Tell Java to stop first, which will unblock the blocking AudioRecord.read() in the background thread
+            try
+            {
+                _javaRecorder?.Call("stopRecording");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AndroidRecorderBridge] Exception during Java stopRecording: {ex.Message}");
+            }
+#endif
+
+            // Wait for the background thread to safely exit
+            _readThread?.Join(1000);
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+            try
+            {
+                _javaRecorder?.Call("release");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AndroidRecorderBridge] Exception during Java release: {ex.Message}");
+            }
+
             _javaRecorder?.Dispose();
             _javaRecorder = null;
 
@@ -134,39 +155,55 @@ namespace Client.Audio
         {
             var token = (CancellationToken)obj;
 
-            while (!token.IsCancellationRequested)
-            {
 #if UNITY_ANDROID && !UNITY_EDITOR
-                var recorder = _javaRecorder;
-                if (recorder == null || !_directFloatBuffer.IsCreated) break;
-
-                int framesRead = recorder.Call<int>("readSamples", _frameSizeInSamples);
-                if (framesRead > 0)
-                {
-                    int samplesCount = framesRead * Channels;
-                    if (samplesCount == _readBuffer.Length)
-                    {
-                        _directFloatBuffer.CopyTo(_readBuffer);
-                    }
-                    else if (samplesCount > 0)
-                    {
-                        var slice = new NativeSlice<float>(_directFloatBuffer, 0, samplesCount);
-                        float[] tempBuffer = new float[samplesCount];
-                        slice.CopyTo(tempBuffer);
-                        Array.Copy(tempBuffer, 0, _readBuffer, 0, samplesCount);
-                    }
-                    OnAudioFrameCaptured?.Invoke(_readBuffer);
-                }
-                else if (framesRead < 0)
-                {
-                    Debug.LogError("[AndroidRecorderBridge] Read error from Java recorder.");
-                    break;
-                }
-#else
-                // Simulate silence in editor
-                Thread.Sleep(10);
+            AndroidJNI.AttachCurrentThread();
+            try
+            {
 #endif
+                while (!token.IsCancellationRequested)
+                {
+#if UNITY_ANDROID && !UNITY_EDITOR
+                    var recorder = _javaRecorder;
+                    if (recorder == null || !_directFloatBuffer.IsCreated) break;
+
+                    int framesRead = recorder.Call<int>("readSamples", _frameSizeInSamples);
+                    if (framesRead > 0)
+                    {
+                        int samplesCount = framesRead * Channels;
+                        if (samplesCount == _readBuffer.Length)
+                        {
+                            _directFloatBuffer.CopyTo(_readBuffer);
+                        }
+                        else if (samplesCount > 0)
+                        {
+                            var slice = new NativeSlice<float>(_directFloatBuffer, 0, samplesCount);
+                            float[] tempBuffer = new float[samplesCount];
+                            slice.CopyTo(tempBuffer);
+                            Array.Copy(tempBuffer, 0, _readBuffer, 0, samplesCount);
+                        }
+                        OnAudioFrameCaptured?.Invoke(_readBuffer);
+                    }
+                    else if (framesRead < 0)
+                    {
+                        Debug.LogError("[AndroidRecorderBridge] Read error from Java recorder.");
+                        break;
+                    }
+#else
+                    // Simulate silence in editor
+                    Thread.Sleep(10);
+#endif
+                }
+#if UNITY_ANDROID && !UNITY_EDITOR
             }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AndroidRecorderBridge] Exception in ReadLoop: {ex.Message}\n{ex.StackTrace}");
+            }
+            finally
+            {
+                AndroidJNI.DetachCurrentThread();
+            }
+#endif
         }
 
         public void Tick() { }
