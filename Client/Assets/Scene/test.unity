@@ -342,10 +342,10 @@ MonoBehaviour:
   Protocol: 1
   ServerHost: 194.33.105.209
   ServerPort: 50006
-  ClientId: 2
+  ClientId: 5
   RoomId: 100
   ConnectOnStart: 1
-  SampleRate: 48000
+  SampleRate: 24000
   Channels: 1
   FrameSizeInSamples: 480
   EnableAndroidAEC: 1

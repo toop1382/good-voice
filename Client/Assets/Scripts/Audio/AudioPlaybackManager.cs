@@ -22,6 +22,8 @@ namespace Client.Audio
             public bool        IsActive;
             public int         LastPlayPos;     // track the last playback position for clearing silence
             public bool        IsBuffering = true;
+            public int         TargetDelayFrames = 10; // Start at 100ms
+            public long        LastStarvationTimeMs;
         }
 
         private readonly int _sampleRate;
@@ -110,9 +112,9 @@ namespace Client.Audio
                         }
                     }
 
-                    // Fixed target delay to absorb network jitter (e.g. 8 frames = 80ms at 10ms/frame)
+                    // Adaptive target delay to absorb network jitter
                     // This provides a stable goalpost for the jitter buffer, preventing erratic pitch shifts.
-                    int targetDelay = 8 * _frameSizeInSamples;
+                    int targetDelay = s.TargetDelayFrames * _frameSizeInSamples;
 
                     // Playout/Jitter Buffering state management
                     if (s.IsBuffering)
@@ -174,11 +176,25 @@ namespace Client.Audio
                     bool starved = (buffered < _frameSizeInSamples / 2) || (buffered > _clipFrames - _frameSizeInSamples);
                     if (starved)
                     {
+                        // Underflow: network jitter exceeded our buffer.
+                        // Increase target delay to prevent future lag, up to ~400ms
+                        s.TargetDelayFrames = Math.Min(s.TargetDelayFrames + 4, 40);
+                        s.LastStarvationTimeMs = now;
+
                         s.Source.Pause();
                         s.IsBuffering = true;
                         s.Clip.Clear();
                         s.LatestAbsoluteIndex = -1;
                         continue;
+                    }
+                    else
+                    {
+                        // Slowly recover latency if the network has been stable for 10 seconds
+                        if (s.TargetDelayFrames > 10 && (now - s.LastStarvationTimeMs) > 10000)
+                        {
+                            s.TargetDelayFrames--;
+                            s.LastStarvationTimeMs = now; // reset timer so we decrease 1 frame every 10s if stable
+                        }
                     }
 
                     // Pitch scaling and hard snap thresholds relative to targetDelay
@@ -293,6 +309,8 @@ namespace Client.Audio
                     IsActive      = true,
                     LastPlayPos   = 0,
                     IsBuffering   = true,
+                    TargetDelayFrames = 10,
+                    LastStarvationTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                 };
 
                 Debug.Log($"[AudioPlaybackManager] Added playback stream for client {clientId}");
