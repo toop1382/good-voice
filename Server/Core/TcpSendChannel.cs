@@ -58,7 +58,6 @@ namespace Server.Core
         private async Task SendLoopAsync()
         {
             var ct = _cts.Token;
-            byte[] lenBuf = new byte[4];
             try
             {
                 while (!ct.IsCancellationRequested && IsAlive)
@@ -66,9 +65,10 @@ namespace Server.Core
                     await _queueSignal.WaitAsync(ct);
                     if (_sendQueue.TryDequeue(out byte[]? data))
                     {
-                        BinaryPrimitives.WriteUInt32LittleEndian(lenBuf, (uint)data.Length);
-                        await _stream.WriteAsync(lenBuf, 0, 4, ct);
-                        await _stream.WriteAsync(data, 0, data.Length, ct);
+                        byte[] frame = new byte[4 + data.Length];
+                        BinaryPrimitives.WriteUInt32LittleEndian(frame, (uint)data.Length);
+                        Buffer.BlockCopy(data, 0, frame, 4, data.Length);
+                        await _stream.WriteAsync(frame, 0, frame.Length, ct);
                     }
                 }
             }

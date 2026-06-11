@@ -54,7 +54,7 @@ namespace Server.Network
             if (_started) return;
             _started = true;
             _cts = new CancellationTokenSource();
-            _socket.Bind(new IPEndPoint(IPAddress.Parse("192.168.1.105"), _port));
+            _socket.Bind(new IPEndPoint(IPAddress.Any, _port));
             Console.WriteLine($"[UDP] Listening on port {_port}");
 
             var ct = _cts.Token;

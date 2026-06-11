@@ -22,7 +22,7 @@ namespace Client.Network
         event Action<double>           OnHandshakeAck;     // (rttMs)
         event Action<bool>             OnRoomJoinAck;      // (success)
         event Action                   OnDisconnected;
-        event Action                   OnHeartbeatAck;
+        event Action<double>           OnHeartbeatAck;
 
         // ── Control ──────────────────────────────────────────────────────
         Task<bool> ConnectAsync(CancellationToken cancellationToken = default);

@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Net.Sockets;
 using System.Threading;
@@ -29,16 +30,18 @@ namespace Client.Network
         public event Action<double>           OnHandshakeAck;
         public event Action<bool>             OnRoomJoinAck;
         public event Action                   OnDisconnected;
-        public event Action                   OnHeartbeatAck;
+        public event Action<double>           OnHeartbeatAck;
 
         private readonly string _host;
         private readonly int    _port;
         private TcpClient       _tcp;
         private NetworkStream   _stream;
         private CancellationTokenSource _cts;
-        private readonly object _writeLock = new();
         private uint  _outSeq;
         private long  _lastHandshakeMs;
+        private readonly ConcurrentQueue<byte[]> _sendQueue = new();
+        private readonly SemaphoreSlim _queueSignal = new(0);
+        private Task _sendLoopTask;
 
         // Pre-allocated length prefix buffer
         private readonly byte[] _lenBuf = new byte[4];
@@ -66,6 +69,7 @@ namespace Client.Network
                 _cts = new CancellationTokenSource();
                 IsConnected = true;
                 _ = Task.Run(() => ReceiveLoopAsync(_cts.Token));
+                _sendLoopTask = Task.Run(() => SendLoopAsync(_cts.Token));
                 SendHandshake();
                 Debug.Log($"[TcpTransport] Connected to {_host}:{_port} as client {ClientId}");
                 return true;
@@ -164,27 +168,52 @@ namespace Client.Network
                     Buffer.BlockCopy(buf, HeaderSize, opus, 0, payloadLen);
                     OnAudioReceived?.Invoke(senderId, opus, payloadLen);
                     break;
-                case 4:
-                    OnHeartbeatAck?.Invoke();
+                 case 4:
+                    long heartbeatTs = BinaryPrimitives.ReadInt64LittleEndian(buf.AsSpan(16, 8));
+                    double heartbeatRtt = NowMs() - heartbeatTs;
+                    OnHeartbeatAck?.Invoke(heartbeatRtt);
                     break;
             }
         }
 
-        private void TrySendFramed(byte[] data, int length)
-        {
-            if (_stream == null || !IsConnected) return;
-            try
-            {
-                lock (_writeLock)
-                {
-                    BinaryPrimitives.WriteUInt32LittleEndian(_lenBuf, (uint)length);
-                    _stream.Write(_lenBuf, 0, 4);
-                    _stream.Write(data, 0, length);
-                }
-            }
-            catch (IOException ex)  { Debug.LogWarning($"[TcpTransport] Send: {ex.Message}"); IsConnected = false; }
-            catch (SocketException ex) { Debug.LogWarning($"[TcpTransport] Send: {ex.Message}"); IsConnected = false; }
-        }
+         private void TrySendFramed(byte[] data, int length)
+         {
+             if (!IsConnected || _stream == null) return;
+ 
+             byte[] frame = new byte[4 + length];
+             BinaryPrimitives.WriteUInt32LittleEndian(frame, (uint)length);
+             Buffer.BlockCopy(data, 0, frame, 4, length);
+ 
+             if (_sendQueue.Count >= 100)
+             {
+                 _sendQueue.TryDequeue(out _);
+             }
+ 
+             _sendQueue.Enqueue(frame);
+             try { _queueSignal.Release(); } catch (ObjectDisposedException) { }
+         }
+ 
+         private async Task SendLoopAsync(CancellationToken ct)
+         {
+             try
+             {
+                 while (!ct.IsCancellationRequested && IsConnected && _stream != null)
+                 {
+                     await _queueSignal.WaitAsync(ct);
+                     if (_sendQueue.TryDequeue(out byte[] frame))
+                     {
+                         await _stream.WriteAsync(frame, 0, frame.Length, ct);
+                     }
+                 }
+             }
+             catch (OperationCanceledException) { }
+             catch (Exception ex)
+             {
+                 Debug.LogWarning($"[TcpTransport] SendLoop error: {ex.Message}");
+                 IsConnected = false;
+                 OnDisconnected?.Invoke();
+             }
+         }
 
         private void TrySend(byte[] data) => TrySendFramed(data, data.Length);
 
@@ -212,6 +241,6 @@ namespace Client.Network
 
         private static long NowMs() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        public void Dispose() { Disconnect(); _cts?.Dispose(); _tcp?.Dispose(); }
+         public void Dispose() { Disconnect(); _cts?.Dispose(); _tcp?.Dispose(); _queueSignal?.Dispose(); }
     }
 }

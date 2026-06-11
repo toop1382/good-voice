@@ -377,9 +377,11 @@ namespace Client.Network
             TearDown();
         }
 
-        private void OnHeartbeatAck()
+        private void OnHeartbeatAck(double rttMs)
         {
             _lastServerHeartbeatTimeMs = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            LastRttMs = (float)rttMs;
+            _diagnostics?.RecordRtt(rttMs);
         }
 
         private void CheckClientTimeouts()

@@ -101,18 +101,23 @@ namespace Client.Audio
                     int playPos = s.Source.timeSamples;
                     int targetDelay = 3 * _frameSizeInSamples; // Jitter buffer delay (e.g. 30ms)
 
+                    // Calculate currently buffered samples *before* dequeuing new frames
+                    int buffered = (s.WriteFramePos - playPos + s.ClipFrames) % s.ClipFrames;
+
+                    // Buffer drift/starvation management:
+                    // If buffer is too small (< 1 frame / 10ms) or too large (> 20 frames / 200ms), snap write position
+                    if (buffered < _frameSizeInSamples || buffered > 20 * _frameSizeInSamples)
+                    {
+                        s.WriteFramePos = (playPos + targetDelay) % s.ClipFrames;
+                        s.Source.pitch = 1.0f;
+                    }
+                    else
+                    {
+                        s.Source.pitch = 1.0f;
+                    }
+
                     while (s.FrameQueue.TryDequeue(out float[] frame))
                     {
-                        // Calculate currently buffered samples between write position and play head
-                        int buffered = (s.WriteFramePos - playPos + s.ClipFrames) % s.ClipFrames;
-
-                        // Drift/Starvation detection:
-                        // If buffer is too small (< 1 frame) or too large (> 8 frames), snap write position
-                        if (buffered < _frameSizeInSamples || buffered > 8 * _frameSizeInSamples)
-                        {
-                            s.WriteFramePos = (playPos + targetDelay) % s.ClipFrames;
-                        }
-
                         s.Clip.SetData(frame, s.WriteFramePos);
                         s.WriteFramePos = (s.WriteFramePos + _frameSizeInSamples) % s.ClipFrames;
                     }

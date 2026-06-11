@@ -151,7 +151,7 @@ namespace Server.Core
                 roomId: header.RoomId,
                 clientId: clientId,
                 sequenceNumber: 0,
-                sendTimestamp: DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond,
+                sendTimestamp: header.SendTimestamp, // echo client T0 for RTT measurement
                 payloadLength: 0);
 
             PacketSerializer.TrySerializeHeader(ackHeader, ackBuf.AsSpan());

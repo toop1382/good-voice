@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -29,12 +30,14 @@ namespace Client.Network
         public event Action<double>           OnHandshakeAck;
         public event Action<bool>             OnRoomJoinAck;
         public event Action                   OnDisconnected;
-        public event Action                   OnHeartbeatAck;
+        public event Action<double>           OnHeartbeatAck;
 
         private readonly string _url; // e.g. "ws://127.0.0.1:50007/voice/"
         private ClientWebSocket      _ws;
         private CancellationTokenSource _cts;
-        private readonly SemaphoreSlim _sendGate = new(1, 1);
+        private readonly ConcurrentQueue<byte[]> _sendQueue = new();
+        private readonly SemaphoreSlim _queueSignal = new(0);
+        private Task _sendLoopTask;
         private uint  _outSeq;
         private long  _lastHandshakeMs;
 
@@ -48,15 +51,16 @@ namespace Client.Network
         {
             try
             {
-                _ws = new ClientWebSocket();
-                _ws.Options.SetBuffer(receiveBufferSize: 256 * 1024, sendBufferSize: 256 * 1024);
-                await _ws.ConnectAsync(new Uri(_url), ct);
-                _cts = new CancellationTokenSource();
-                _ = Task.Run(() => ReceiveLoopAsync(_cts.Token));
-                await SendHandshakeAsync();
-                IsConnected = true;
-                Debug.Log($"[WsTransport] Connected to {_url} as client {ClientId}");
-                return true;
+                 _ws = new ClientWebSocket();
+                 _ws.Options.SetBuffer(receiveBufferSize: 256 * 1024, sendBufferSize: 256 * 1024);
+                 await _ws.ConnectAsync(new Uri(_url), ct);
+                 _cts = new CancellationTokenSource();
+                 IsConnected = true;
+                 _ = Task.Run(() => ReceiveLoopAsync(_cts.Token));
+                 _sendLoopTask = Task.Run(() => SendLoopAsync(_cts.Token));
+                 SendHandshake();
+                 Debug.Log($"[WsTransport] Connected to {_url} as client {ClientId}");
+                 return true;
             }
             catch (Exception ex) { Debug.LogError($"[WsTransport] Connect failed: {ex.Message}"); return false; }
         }
@@ -99,12 +103,12 @@ namespace Client.Network
             catch { }
         }
 
-        private async Task SendHandshakeAsync()
+        private void SendHandshake()
         {
             _lastHandshakeMs = NowMs();
             byte[] buf = new byte[HeaderSize];
             WriteHeader(buf, 1, 0, ClientId, 0, _lastHandshakeMs, 0);
-            await SendAsync(buf, HeaderSize);
+            TrySend(buf, HeaderSize);
         }
 
         private async Task ReceiveLoopAsync(CancellationToken ct)
@@ -156,31 +160,51 @@ namespace Client.Network
                     Buffer.BlockCopy(buf, HeaderSize, opus, 0, payloadLen);
                     OnAudioReceived?.Invoke(senderId, opus, payloadLen);
                     break;
-                case 4:
-                    OnHeartbeatAck?.Invoke();
+                 case 4:
+                    long heartbeatTs = BinaryPrimitives.ReadInt64LittleEndian(buf.AsSpan(16, 8));
+                    double heartbeatRtt = NowMs() - heartbeatTs;
+                    OnHeartbeatAck?.Invoke(heartbeatRtt);
                     break;
             }
         }
 
         private void TrySend(byte[] data, int len)
         {
-            _ = Task.Run(async () =>
+            if (!IsConnected || _ws?.State != WebSocketState.Open) return;
+ 
+            byte[] copy = new byte[len];
+            Buffer.BlockCopy(data, 0, copy, 0, len);
+ 
+            if (_sendQueue.Count >= 100)
             {
-                try { await SendAsync(data, len); }
-                catch (Exception ex) { Debug.LogWarning($"[WsTransport] Send: {ex.Message}"); }
-            });
+                _sendQueue.TryDequeue(out _);
+            }
+ 
+            _sendQueue.Enqueue(copy);
+            try { _queueSignal.Release(); } catch (ObjectDisposedException) { }
         }
-
-        private async Task SendAsync(byte[] data, int len)
+ 
+        private async Task SendLoopAsync(CancellationToken ct)
         {
-            if (_ws?.State != WebSocketState.Open) return;
-            await _sendGate.WaitAsync();
             try
             {
-                await _ws.SendAsync(new ArraySegment<byte>(data, 0, len),
-                    WebSocketMessageType.Binary, endOfMessage: true, CancellationToken.None);
+                while (!ct.IsCancellationRequested && IsConnected && _ws?.State == WebSocketState.Open)
+                {
+                    await _queueSignal.WaitAsync(ct);
+                    if (_sendQueue.TryDequeue(out byte[] data))
+                    {
+                        await _ws.SendAsync(new ArraySegment<byte>(data),
+                            WebSocketMessageType.Binary, endOfMessage: true, ct);
+                    }
+                }
             }
-            finally { _sendGate.Release(); }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[WsTransport] SendLoop error: {ex.Message}");
+                IsConnected = false;
+                OnDisconnected?.Invoke();
+            }
         }
 
         private static void WriteHeader(byte[] buf, int type, int room, int client, uint seq, long ts, int payloadLen)
@@ -195,6 +219,6 @@ namespace Client.Network
 
         private static long NowMs() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        public void Dispose() { Disconnect(); _cts?.Dispose(); _ws?.Dispose(); _sendGate.Dispose(); }
+         public void Dispose() { Disconnect(); _cts?.Dispose(); _ws?.Dispose(); _queueSignal.Dispose(); }
     }
 }

@@ -26,7 +26,7 @@ namespace Client.Network
         public event Action<double>           OnHandshakeAck;
         public event Action<bool>             OnRoomJoinAck;
         public event Action                   OnDisconnected;
-        public event Action                   OnHeartbeatAck;
+        public event Action<double>           OnHeartbeatAck;
 
         private readonly string _host;
         private readonly int    _port;
@@ -149,7 +149,9 @@ namespace Client.Network
                     }
                     break;
                 case 4:
-                    OnHeartbeatAck?.Invoke();
+                    long heartbeatTs = BinaryPrimitives.ReadInt64LittleEndian(buf.AsSpan(16, 8));
+                    double heartbeatRtt = NowMs() - heartbeatTs;
+                    OnHeartbeatAck?.Invoke(heartbeatRtt);
                     break;
             }
         }

@@ -340,9 +340,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Client.Network.VoiceNetworkManager
   Protocol: 1
-  ServerHost: 192.168.1.105
+  ServerHost: 127.0.0.1
   ServerPort: 50006
-  ClientId: 73
+  ClientId: 2
   RoomId: 100
   ConnectOnStart: 1
   SampleRate: 48000
