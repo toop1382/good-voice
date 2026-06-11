@@ -30,7 +30,7 @@ namespace Client.Audio
         private readonly int _clipFrames;        // ring-buffer length in frames (2 seconds)
         private readonly Transform _audioParent;
 
-        private readonly Dictionary<int, RemoteStream> _streams = new();
+        private readonly ConcurrentDictionary<int, RemoteStream> _streams = new();
         private readonly Dictionary<int, float[]> _silenceArrays = new();
 
         private float[] GetSilenceArray(int length)
@@ -62,14 +62,11 @@ namespace Client.Audio
         /// </summary>
         public void EnqueueAudio(int clientId, int absoluteIndex, float[] pcmFloats)
         {
-            lock (_streams)
+            if (_streams.TryGetValue(clientId, out var s))
             {
-                if (_streams.TryGetValue(clientId, out var s))
-                {
-                    s.FrameQueue.Enqueue((absoluteIndex, pcmFloats));
-                    s.LastActivityTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                    s.IsActive = true;
-                }
+                s.FrameQueue.Enqueue((absoluteIndex, pcmFloats));
+                s.LastActivityTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                s.IsActive = true;
             }
         }
 
@@ -79,10 +76,8 @@ namespace Client.Audio
         /// </summary>
         public void Tick()
         {
-            lock (_streams)
-            {
-                long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                foreach (var kvp in _streams)
+            long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            foreach (var kvp in _streams)
                 {
                     var s = kvp.Value;
                     if (s.Source == null || s.Clip == null) continue;
@@ -256,7 +251,6 @@ namespace Client.Audio
                         s.Source.pitch = 1.0f;
                     }
                 }
-            }
         }
 
         /// <summary>
@@ -264,9 +258,7 @@ namespace Client.Audio
         /// </summary>
         public void AddClient(int clientId)
         {
-            lock (_streams)
-            {
-                if (_streams.ContainsKey(clientId)) return;
+            if (_streams.ContainsKey(clientId)) return;
 
                 var go = new GameObject($"VoiceStream_{clientId}");
                 go.transform.SetParent(_audioParent, false);
@@ -304,7 +296,6 @@ namespace Client.Audio
                 };
 
                 Debug.Log($"[AudioPlaybackManager] Added playback stream for client {clientId}");
-            }
         }
 
         /// <summary>
@@ -312,28 +303,21 @@ namespace Client.Audio
         /// </summary>
         public void RemoveClient(int clientId)
         {
-            lock (_streams)
-            {
-                if (!_streams.TryGetValue(clientId, out var stream)) return;
-                stream.Source.Stop();
-                UnityEngine.Object.Destroy(stream.Source.gameObject);
-                _streams.Remove(clientId);
-                Debug.Log($"[AudioPlaybackManager] Removed stream for client {clientId}");
-            }
+            if (!_streams.TryRemove(clientId, out var stream)) return;
+            stream.Source.Stop();
+            UnityEngine.Object.Destroy(stream.Source.gameObject);
+            Debug.Log($"[AudioPlaybackManager] Removed stream for client {clientId}");
         }
 
         public void Dispose()
         {
-            lock (_streams)
+            foreach (var kvp in _streams)
             {
-                foreach (var kvp in _streams)
-                {
-                    kvp.Value.Source?.Stop();
-                    if (kvp.Value.Source != null)
-                        UnityEngine.Object.Destroy(kvp.Value.Source.gameObject);
-                }
-                _streams.Clear();
+                kvp.Value.Source?.Stop();
+                if (kvp.Value.Source != null)
+                    UnityEngine.Object.Destroy(kvp.Value.Source.gameObject);
             }
+            _streams.Clear();
         }
     }
 }

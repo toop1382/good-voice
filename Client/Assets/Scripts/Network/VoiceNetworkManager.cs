@@ -42,7 +42,7 @@ namespace Client.Network
         public bool ConnectOnStart = true;
 
         [Header("Audio")]
-        public int SampleRate = 48000;
+        public SamplingFrequency SampleRate = SamplingFrequency.Frequency_48000;
         public int Channels = 1;
         [Tooltip("Opus frame size in samples: 480 = 10ms at 48kHz")]
         public int FrameSizeInSamples = 480;
@@ -234,15 +234,15 @@ namespace Client.Network
 #endif
 
             _encoder = new OpusEncoder(
-                (SamplingFrequency)SampleRate, (NumChannels)Channels, OpusApplication.VoIP);
+                SampleRate, (NumChannels)Channels, OpusApplication.VoIP);
             _encoder.Bitrate    = 24000;
             _encoder.Complexity = 5;
             _encoder.Signal     = OpusSignal.Voice;
 
-            _playback = new AudioPlaybackManager(SampleRate, Channels, FrameSizeInSamples, transform);
+            _playback = new AudioPlaybackManager((int)SampleRate, Channels, FrameSizeInSamples, transform);
 
             _recorder = AudioRecorderFactory.Create(
-                SampleRate, Channels, FrameSizeInSamples, EnableAndroidAEC, EnableAndroidNS, EnableAndroidAGC);
+                (int)SampleRate, Channels, FrameSizeInSamples, EnableAndroidAEC, EnableAndroidNS, EnableAndroidAGC);
             _recorder.OnAudioFrameCaptured += OnAudioFrameCaptured;
             _recorder.StartRecording();
 
@@ -306,7 +306,7 @@ namespace Client.Network
             {
                 if (!_decoders.TryGetValue(senderId, out decoder))
                 {
-                    decoder = new OpusDecoder((SamplingFrequency)SampleRate, (NumChannels)Channels);
+                    decoder = new OpusDecoder(SampleRate, (NumChannels)Channels);
                     _decoders[senderId] = decoder;
                     UnityMainThreadDispatcher.Enqueue(() => _playback?.AddClient(senderId));
                 }

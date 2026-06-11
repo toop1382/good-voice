@@ -342,7 +342,7 @@ MonoBehaviour:
   Protocol: 1
   ServerHost: 194.33.105.209
   ServerPort: 50006
-  ClientId: 1
+  ClientId: 2
   RoomId: 100
   ConnectOnStart: 1
   SampleRate: 48000
