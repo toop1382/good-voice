@@ -40,6 +40,8 @@ namespace Client.Network
         public int RoomId = 1;
         [Tooltip("Automatically connect and join the room on Start")]
         public bool ConnectOnStart = true;
+        [Tooltip("Automatically attach the runtime debug UI (F1 overlay)")]
+        public bool AutoAttachDebugUI = true;
 
         [Header("Audio")]
         public SamplingFrequency SampleRate = SamplingFrequency.Frequency_48000;
@@ -79,9 +81,9 @@ namespace Client.Network
         private byte[] _encodeOutputBuf;
         private bool _isMuted;
         private DiagnosticsCollector _diagnostics;
-        private readonly Dictionary<int, uint> _receiveSeqs = new();
         private long _lastServerHeartbeatTimeMs;
         private float _heartbeatTimer;
+        private float _diagTickTimer;
         private bool _isDestroyed;
 
         private readonly object _audioLock = new object();
@@ -99,8 +101,11 @@ namespace Client.Network
                 Debug.Log("[VoiceNetworkManager] Automatically created UnityMainThreadDispatcher.");
             }
 
-            // Automatically attach the runtime debug UI
-            gameObject.AddComponent<VoiceChatDebugUI>();
+            // Automatically attach the runtime debug UI if configured
+            if (AutoAttachDebugUI)
+            {
+                gameObject.AddComponent<VoiceChatDebugUI>();
+            }
         }
 
         private async void Start()
@@ -119,8 +124,13 @@ namespace Client.Network
                 SetupAudioPipeline();
             }
 
-            // Tick diagnostics to compute bandwidth
-            _diagnostics?.Tick();
+            // Tick diagnostics once per second to compute bandwidth
+            _diagTickTimer += Time.deltaTime;
+            if (_diagTickTimer >= 1f)
+            {
+                _diagTickTimer = 0f;
+                _diagnostics?.Tick();
+            }
 
             // Drain queued decoded PCM frames into AudioClip ring buffers.
             // AudioPlaybackManager.Tick() must run on the Unity main thread.
@@ -297,10 +307,9 @@ namespace Client.Network
             });
         }
 
-        private void OnAudioReceived(int senderId, byte[] opusPacket, int opusLength)
+        private void OnAudioReceived(int senderId, byte[] opusPacket, int opusLength, uint sequenceNumber, long sendTimestamp)
         {
             OpusDecoder decoder;
-            uint seq;
 
             lock (_decoders)
             {
@@ -311,21 +320,17 @@ namespace Client.Network
                     UnityMainThreadDispatcher.Enqueue(() => _playback?.AddClient(senderId));
                 }
 
-                // Track diagnostics locally
-                _receiveSeqs.TryGetValue(senderId, out seq);
-                seq++;
-                _receiveSeqs[senderId] = seq;
                 _lastReceiveTimeMs[senderId] = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             }
 
             _lastServerHeartbeatTimeMs = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-            _diagnostics?.RecordPacketReceived(senderId, (long)seq, opusLength);
+            _diagnostics?.RecordPacketReceived(senderId, (long)sequenceNumber, opusLength, sendTimestamp);
 
             float[] pcm = new float[FrameSizeInSamples * Channels];
             int decoded = decoder.Decode(opusPacket, opusLength, pcm);
             if (decoded > 0)
-                _playback?.EnqueueAudio(senderId, (int)seq, pcm);
+                _playback?.EnqueueAudio(senderId, (int)sequenceNumber, pcm);
         }
 
         private void OnDisconnect()
@@ -381,7 +386,6 @@ namespace Client.Network
                 {
                     foreach (var d in _decoders.Values) d?.Dispose();
                     _decoders.Clear();
-                    _receiveSeqs.Clear();
                     _lastReceiveTimeMs.Clear();
                 }
 
@@ -390,7 +394,7 @@ namespace Client.Network
                     _transport.OnHandshakeAck  -= OnHandshakeAck;
                     _transport.OnRoomJoinAck   -= OnRoomJoinAck;
                     _transport.OnAudioReceived -= OnAudioReceived;
-                    _transport.OnDisconnected  -= OnDisconnected;
+                    _transport.OnDisconnected  -= OnDisconnect;
                     _transport.OnHeartbeatAck  -= OnHeartbeatAck;
                     _transport.Dispose();
                     _transport = null;
@@ -398,6 +402,7 @@ namespace Client.Network
 
                 _playback?.Dispose();
                 _playback = null;
+                _diagnostics?.Reset();
 
                 if (wasConnected && !_isDestroyed)
                 {
@@ -443,10 +448,10 @@ namespace Client.Network
                         decoder?.Dispose();
                         _decoders.Remove(clientId);
                     }
-                    _receiveSeqs.Remove(clientId);
                     _lastReceiveTimeMs.Remove(clientId);
 
                     _playback?.RemoveClient(clientId);
+                    _diagnostics?.RemoveClient(clientId);
                 }
             }
         }

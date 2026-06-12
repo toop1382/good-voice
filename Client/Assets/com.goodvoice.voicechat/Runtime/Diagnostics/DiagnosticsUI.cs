@@ -28,20 +28,21 @@ namespace Client
         // Smoothed values for display
         private DiagnosticsSnapshot _snapshot;
 
+        private Rect _windowRect = new Rect(Screen.width - 290, 10, 280, 240);
+
         private void Start()
         {
             _collector = VoiceManager != null
                 ? GetDiagnosticsFromManager()
                 : null;
+
+            // Set initial window position
+            _windowRect = new Rect(Screen.width - 290, 10, 280, 240);
         }
 
         private DiagnosticsCollector GetDiagnosticsFromManager()
         {
-            // VoiceNetworkManager exposes diagnostics via property
-            var field = VoiceManager.GetType()
-                .GetField("_diagnostics",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            return field?.GetValue(VoiceManager) as DiagnosticsCollector;
+            return VoiceManager != null ? VoiceManager.Diagnostics : null;
         }
 
         private void Update()
@@ -53,7 +54,6 @@ namespace Client
             if (_tickTimer >= 1f)
             {
                 _tickTimer = 0f;
-                _collector?.Tick();
                 if (_collector != null)
                     _snapshot = _collector.GetSnapshot();
             }
@@ -64,11 +64,12 @@ namespace Client
             if (_stylesInit) return;
             _stylesInit = true;
 
-            _panelStyle = new GUIStyle(GUI.skin.box)
+            _panelStyle = new GUIStyle(GUI.skin.window)
             {
-                padding = new RectOffset(12, 12, 10, 10)
+                padding = new RectOffset(12, 12, 16, 10)
             };
             _panelStyle.normal.background = MakeTex(2, 2, new Color(0.05f, 0.05f, 0.1f, 0.85f));
+            _panelStyle.onNormal.background = _panelStyle.normal.background;
 
             _titleStyle = new GUIStyle(GUI.skin.label)
             {
@@ -89,19 +90,20 @@ namespace Client
             if (!ShowPanel) return;
             InitStyles();
 
-            float w = 280f, h = 220f;
-            float x = Screen.width - w - 10;
-            float y = 10;
+            // Keep window within screen bounds
+            if (_windowRect.x + _windowRect.width > Screen.width)
+                _windowRect.x = Screen.width - _windowRect.width - 10;
+            if (_windowRect.y + _windowRect.height > Screen.height)
+                _windowRect.y = Screen.height - _windowRect.height - 10;
 
-            GUI.BeginGroup(new Rect(x, y, w, h), _panelStyle);
+            _windowRect = GUI.Window(101, _windowRect, DrawDiagnosticsWindow, "📡 VOICE CHAT DIAGNOSTICS", _panelStyle);
+        }
 
-            float ly = 10;
-            float lh = 22;
-
-            GUI.Label(new Rect(10, ly, w - 20, lh), "📡 VOICE CHAT DIAGNOSTICS", _titleStyle);
-            ly += lh + 4;
-
-            DrawSeparator(ly - 4, w);
+        private void DrawDiagnosticsWindow(int windowId)
+        {
+            float w = _windowRect.width;
+            float ly = 24;
+            float lh = 20;
 
             // Connection state
             string state = VoiceManager != null ? VoiceManager.CurrentState.ToString() : "N/A";
@@ -133,14 +135,18 @@ namespace Client
             // Mic level
             int barWidth = (int)((_snapshot.InputLevelRms * 160f));
             GUI.Label(new Rect(10, ly, 70, lh), "Mic:", _labelStyle);
-            GUI.Box(new Rect(75, ly + 4, 160, 14), "");
-            GUI.Box(new Rect(75, ly + 4, barWidth, 14), "");
-            ly += lh;
+            GUI.Box(new Rect(75, ly + 2, 160, 14), "");
+            if (barWidth > 0)
+            {
+                GUI.Box(new Rect(75, ly + 2, Mathf.Min(barWidth, 160), 14), "");
+            }
+            ly += lh + 6;
 
             GUI.Label(new Rect(10, ly, w - 20, 14),
-                $"[{ToggleKey}] Toggle   |   UDP voice chat", _labelStyle);
+                $"[{ToggleKey}] Toggle Panel", _labelStyle);
 
-            GUI.EndGroup();
+            // Drag window behavior (drag title bar)
+            GUI.DragWindow(new Rect(0, 0, 10000, 24));
         }
 
         private void DrawColorLabel(float x, float y, float w, float h, string text, Color color)

@@ -22,7 +22,7 @@ namespace Client.Network
         public int    ClientId      { get; }
         public int    RoomId        { get; private set; }
 
-        public event Action<int, byte[], int> OnAudioReceived;
+        public event Action<int, byte[], int, uint, long> OnAudioReceived;
         public event Action<double>           OnHandshakeAck;
         public event Action<bool>             OnRoomJoinAck;
         public event Action                   OnDisconnected;
@@ -145,7 +145,9 @@ namespace Client.Network
                     {
                         byte[] opus = new byte[payloadLen];
                         Buffer.BlockCopy(buf, HeaderSize, opus, 0, payloadLen);
-                        OnAudioReceived?.Invoke(senderId, opus, payloadLen);
+                        uint seq = BinaryPrimitives.ReadUInt32LittleEndian(buf.AsSpan(12, 4));
+                        long ts = BinaryPrimitives.ReadInt64LittleEndian(buf.AsSpan(16, 8));
+                        OnAudioReceived?.Invoke(senderId, opus, payloadLen, seq, ts);
                     }
                     break;
                 case 4:

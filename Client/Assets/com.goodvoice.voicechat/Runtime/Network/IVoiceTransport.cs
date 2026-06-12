@@ -18,7 +18,7 @@ namespace Client.Network
         int RoomId { get; }
 
         // ── Events (fired on receive thread — marshal to main thread as needed) ──
-        event Action<int, byte[], int> OnAudioReceived;    // (senderId, opusData, opusLength)
+        event Action<int, byte[], int, uint, long> OnAudioReceived;    // (senderId, opusData, opusLength, sequenceNumber, sendTimestamp)
         event Action<double>           OnHandshakeAck;     // (rttMs)
         event Action<bool>             OnRoomJoinAck;      // (success)
         event Action                   OnDisconnected;

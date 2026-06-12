@@ -25,6 +25,7 @@ namespace Client.Network
         private string _clientIdStr;
         private string _roomIdStr;
         private int _protocolIndex; // 0 = UDP, 1 = TCP, 2 = WebSocket
+        private Rect _windowRect = new Rect(20, 20, 360, 520); // Draggable window rect
 
         // Styling textures
         private Texture2D _panelTex;
@@ -73,10 +74,11 @@ namespace Client.Network
         {
             if (_stylesInitialized) return;
 
-            // Panel style
-            _panelStyle = new GUIStyle();
+            // Panel style based on window style
+            _panelStyle = new GUIStyle(GUI.skin.window);
             _panelStyle.normal.background = _panelTex;
-            _panelStyle.padding = new RectOffset(16, 16, 16, 16);
+            _panelStyle.onNormal.background = _panelTex;
+            _panelStyle.padding = new RectOffset(16, 16, 28, 16);
 
             // Title style (clean sans-serif style)
             _titleStyle = new GUIStyle();
@@ -131,24 +133,18 @@ namespace Client.Network
         {
             InitializeStyles();
 
-            // Calculate responsive scale factor relative to 1280x720 virtual resolution
-            float scale = Screen.width / 1280f;
-            if (scale < 0.7f) scale = 0.7f; // clamp minimum scale
+            // Keep window within screen bounds
+            if (_windowRect.x + _windowRect.width > Screen.width)
+                _windowRect.x = Screen.width - _windowRect.width - 20;
+            if (_windowRect.y + _windowRect.height > Screen.height)
+                _windowRect.y = Screen.height - _windowRect.height - 20;
 
-            Matrix4x4 origMatrix = GUI.matrix;
-            Vector3 scaleVector = new Vector3(scale, scale, 1.0f);
-            GUI.matrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, scaleVector);
+            _windowRect = GUI.Window(100, _windowRect, DrawDebugWindow, "📡 GOODVOICE CHAT PANEL", _panelStyle);
+        }
 
-            // Dimensions in virtual pixel space
-            float width = 360f;
-            float height = 520f;
-            float x = (1280f - width) - 20f; // 20px padding from right side
-            float y = 20f;
-
-            GUILayout.BeginArea(new Rect(x, y, width, height), _panelStyle);
-
-            // Title
-            GUILayout.Label("VOICE CHAT CONTROL PANEL", _titleStyle);
+        private void DrawDebugWindow(int windowId)
+        {
+            GUILayout.Space(8);
 
             // --- Server Connection Form ---
             GUILayout.BeginHorizontal();
@@ -315,9 +311,8 @@ namespace Client.Network
             DrawLevelMeter(meterRect, volumeLevel);
             GUILayout.EndHorizontal();
 
-            GUILayout.EndArea();
-
-            GUI.matrix = origMatrix;
+            // Drag window behavior
+            GUI.DragWindow(new Rect(0, 0, 10000, 24));
         }
 
         private void DrawDivider()

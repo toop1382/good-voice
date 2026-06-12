@@ -25,11 +25,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="..\Client\Assets\Scripts\Codec\**\*.cs" Link="Codec\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="..\Client\Packages\com.goodvoice.voicechat\Runtime\Codec\**\*.cs" Link="Codec\%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="..\Client\Assets\Plugins\x64\UnityOpus.dll">
+    <None Include="..\Client\Packages\com.goodvoice.voicechat\Plugins\x64\UnityOpus.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

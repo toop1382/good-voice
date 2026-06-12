@@ -13,11 +13,11 @@
     <ProductVersion>10.0.20506</ProductVersion>
     <SchemaVersion>2.0</SchemaVersion>
     <RootNamespace></RootNamespace>
-    <ProjectGuid>{8e399d07-fc4a-7ecd-7881-f923d075ebd1}</ProjectGuid>
+    <ProjectGuid>{61af07c9-2787-e50d-40b3-337faa3d6e80}</ProjectGuid>
     <ProjectTypeGuids>{E097FAD1-6243-4DAD-9C02-E9B9EFC3FFC1};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <AssemblyName>Assembly-CSharp-firstpass</AssemblyName>
+    <AssemblyName>Unity.Mobile.AndroidLogcat.Runtime.Tests</AssemblyName>
     <TargetFrameworkVersion>v4.7.1</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <BaseDirectory>.</BaseDirectory>
@@ -42,7 +42,7 @@
     <ImplicitlyExpandDesignTimeFacades>false</ImplicitlyExpandDesignTimeFacades>
   </PropertyGroup>
   <ItemGroup>
-    <None Include="Assets\Plugins\Android\AndroidVoiceRecorder.java" />
+    <None Include="Library\PackageCache\com.unity.mobile.android-logcat\Tests\Runtime\Unity.Mobile.AndroidLogcat.Runtime.Tests.asmdef" />
     <Reference Include="UnityEngine">
       <HintPath>H:\Idrive\unity\New folder\6000.0.23f1\Editor\Data\Managed\UnityEngine\UnityEngine.dll</HintPath>
     </Reference>

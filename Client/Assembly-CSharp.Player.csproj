@@ -53,6 +53,7 @@
     <Compile Include="Assets\Scripts\Audio\UnityMicRecorder.cs" />
     <Compile Include="Assets\Scripts\Audio\AudioRecorderFactory.cs" />
     <Compile Include="Assets\Scripts\Diagnostics\DiagnosticsCollector.cs" />
+    <Compile Include="Assets\Scripts\Network\VoiceChatDebugUI.cs" />
     <Compile Include="Assets\Scripts\Network\WebSocketVoiceTransport.cs" />
     <Compile Include="Assets\Scripts\Audio\WasapiRecorder.cs" />
     <Compile Include="Assets\Scripts\UnityMainThreadDispatcher.cs" />
@@ -61,6 +62,7 @@
     <Compile Include="Assets\Scripts\Network\TcpVoiceTransport.cs" />
     <Compile Include="Assets\Scripts\Network\VoiceTransportFactory.cs" />
     <Compile Include="Assets\Scripts\Audio\AndroidRecorderBridge.cs" />
+    <Compile Include="Assets\Scripts\Audio\CircularAudioClip.cs" />
     <Compile Include="Assets\Scripts\Codec\IOpusDecoder.cs" />
     <Compile Include="Assets\Scripts\Network\UdpVoiceClient.cs" />
     <Compile Include="Assets\Scripts\Network\UdpVoiceTransport.cs" />

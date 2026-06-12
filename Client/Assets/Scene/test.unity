@@ -317,7 +317,6 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 2036782595}
-  - component: {fileID: 2036782594}
   - component: {fileID: 2036782593}
   - component: {fileID: 2036782592}
   m_Layer: 0
@@ -342,9 +341,10 @@ MonoBehaviour:
   Protocol: 1
   ServerHost: 194.33.105.209
   ServerPort: 50006
-  ClientId: 5
+  ClientId: 8
   RoomId: 100
   ConnectOnStart: 1
+  AutoAttachDebugUI: 1
   SampleRate: 24000
   Channels: 1
   FrameSizeInSamples: 480
@@ -363,21 +363,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2d842006315e5f94bb27e1cfb5a0f094, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Client.UnityMainThreadDispatcher
---- !u!114 &2036782594
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2036782591}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e83752797d492c848980b50c9c66cad0, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Client.DiagnosticsUI
-  VoiceManager: {fileID: 2036782592}
-  ShowPanel: 1
-  ToggleKey: 282
 --- !u!4 &2036782595
 Transform:
   m_ObjectHideFlags: 0
