@@ -97,7 +97,10 @@ namespace Client.Audio
                             s.LastPlayPos = 0;
                             s.IsBuffering = true;
                             // Clear queued frames
-                            while (s.FrameQueue.TryDequeue(out _)) { }
+                            while (s.FrameQueue.TryDequeue(out var item))
+                            {
+                                System.Buffers.ArrayPool<float>.Shared.Return(item.pcm);
+                            }
                         }
                         continue;
                     }
@@ -109,6 +112,7 @@ namespace Client.Audio
                         {
                             s.Clip.Write(item.absoluteIndex, item.pcm);
                             s.LatestAbsoluteIndex = item.absoluteIndex;
+                            System.Buffers.ArrayPool<float>.Shared.Return(item.pcm);
                         }
                     }
 
@@ -141,6 +145,7 @@ namespace Client.Audio
                             {
                                 s.Clip.Write(item.absoluteIndex, item.pcm);
                                 s.LatestAbsoluteIndex = item.absoluteIndex;
+                                System.Buffers.ArrayPool<float>.Shared.Return(item.pcm);
                             }
 
                             s.IsBuffering = false;
@@ -324,6 +329,10 @@ namespace Client.Audio
             if (!_streams.TryRemove(clientId, out var stream)) return;
             stream.Source.Stop();
             UnityEngine.Object.Destroy(stream.Source.gameObject);
+            while (stream.FrameQueue.TryDequeue(out var item))
+            {
+                System.Buffers.ArrayPool<float>.Shared.Return(item.pcm);
+            }
             Debug.Log($"[AudioPlaybackManager] Removed stream for client {clientId}");
         }
 
@@ -334,6 +343,10 @@ namespace Client.Audio
                 kvp.Value.Source?.Stop();
                 if (kvp.Value.Source != null)
                     UnityEngine.Object.Destroy(kvp.Value.Source.gameObject);
+                while (kvp.Value.FrameQueue.TryDequeue(out var item))
+                {
+                    System.Buffers.ArrayPool<float>.Shared.Return(item.pcm);
+                }
             }
             _streams.Clear();
         }

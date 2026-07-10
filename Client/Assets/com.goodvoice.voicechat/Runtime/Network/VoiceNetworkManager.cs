@@ -327,10 +327,16 @@ namespace Client.Network
 
             _diagnostics?.RecordPacketReceived(senderId, (long)sequenceNumber, opusLength, sendTimestamp);
 
-            float[] pcm = new float[FrameSizeInSamples * Channels];
+            float[] pcm = System.Buffers.ArrayPool<float>.Shared.Rent(FrameSizeInSamples * Channels);
             int decoded = decoder.Decode(opusPacket, opusLength, pcm);
             if (decoded > 0)
+            {
                 _playback?.EnqueueAudio(senderId, (int)sequenceNumber, pcm);
+            }
+            else
+            {
+                System.Buffers.ArrayPool<float>.Shared.Return(pcm);
+            }
         }
 
         private void OnDisconnect()
