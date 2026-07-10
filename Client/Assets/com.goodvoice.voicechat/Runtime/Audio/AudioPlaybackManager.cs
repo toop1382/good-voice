@@ -162,6 +162,28 @@ namespace Client.Audio
 
                     int playPosVal = s.Source.timeSamples;
 
+                    // Clear audio that has just been played to prevent echoing on packet loss
+                    if (s.Source.isPlaying && playPosVal != s.LastPlayPos)
+                    {
+                        int startClear = s.LastPlayPos;
+                        int endClear = playPosVal;
+                        
+                        if (endClear > startClear)
+                        {
+                            s.Clip.AudioClip.SetData(GetSilenceArray((endClear - startClear) * _channels), startClear);
+                        }
+                        else
+                        {
+                            int len1 = _clipFrames - startClear;
+                            s.Clip.AudioClip.SetData(GetSilenceArray(len1 * _channels), startClear);
+                            if (endClear > 0)
+                            {
+                                s.Clip.AudioClip.SetData(GetSilenceArray(endClear * _channels), 0);
+                            }
+                        }
+                        s.LastPlayPos = playPosVal;
+                    }
+
                     // Calculate currently buffered samples *before* dequeuing new frames
                     int nextLocalIndex = (s.LatestAbsoluteIndex != -1)
                         ? s.Clip.GetNormalizedIndex(s.LatestAbsoluteIndex + 1)
@@ -177,8 +199,8 @@ namespace Client.Audio
                     if (starved)
                     {
                         // Underflow: network jitter exceeded our buffer.
-                        // Increase target delay to prevent future lag, up to ~400ms
-                        s.TargetDelayFrames = Math.Min(s.TargetDelayFrames + 4, 40);
+                        // Increase target delay to prevent future lag, up to ~100 frames (1 second) for weak internets
+                        s.TargetDelayFrames = Math.Min(s.TargetDelayFrames + 4, 100);
                         s.LastStarvationTimeMs = now;
 
                         s.Source.Pause();
