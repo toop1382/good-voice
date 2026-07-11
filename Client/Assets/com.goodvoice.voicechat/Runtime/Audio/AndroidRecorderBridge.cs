@@ -176,10 +176,10 @@ namespace Client.Audio
                         }
                         else if (samplesCount > 0)
                         {
-                            var slice = new NativeSlice<float>(_directFloatBuffer, 0, samplesCount);
-                            float[] tempBuffer = new float[samplesCount];
-                            slice.CopyTo(tempBuffer);
-                            Array.Copy(tempBuffer, 0, _readBuffer, 0, samplesCount);
+                            for (int i = 0; i < samplesCount; i++)
+                            {
+                                _readBuffer[i] = _directFloatBuffer[i];
+                            }
                         }
                         OnAudioFrameCaptured?.Invoke(_readBuffer);
                     }

@@ -156,11 +156,20 @@ namespace Client.Network
                     OnRoomJoinAck?.Invoke(ok);
                     break;
                 case 3 when payloadLen > 0 && senderId != ClientId:
-                    byte[] opus = new byte[payloadLen];
-                    Buffer.BlockCopy(buf, HeaderSize, opus, 0, payloadLen);
-                    uint seq = BinaryPrimitives.ReadUInt32LittleEndian(buf.AsSpan(12, 4));
-                    long ts = BinaryPrimitives.ReadInt64LittleEndian(buf.AsSpan(16, 8));
-                    OnAudioReceived?.Invoke(senderId, opus, payloadLen, seq, ts);
+                    {
+                        byte[] opus = System.Buffers.ArrayPool<byte>.Shared.Rent(payloadLen);
+                        try
+                        {
+                            Buffer.BlockCopy(buf, HeaderSize, opus, 0, payloadLen);
+                            uint seq = BinaryPrimitives.ReadUInt32LittleEndian(buf.AsSpan(12, 4));
+                            long ts = BinaryPrimitives.ReadInt64LittleEndian(buf.AsSpan(16, 8));
+                            OnAudioReceived?.Invoke(senderId, opus, payloadLen, seq, ts);
+                        }
+                        finally
+                        {
+                            System.Buffers.ArrayPool<byte>.Shared.Return(opus);
+                        }
+                    }
                     break;
                  case 4:
                     long heartbeatTs = BinaryPrimitives.ReadInt64LittleEndian(buf.AsSpan(16, 8));

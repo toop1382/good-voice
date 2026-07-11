@@ -35,6 +35,7 @@ namespace Client.Network
         private CancellationTokenSource _cts;
         private uint  _outSeq;
         private long  _lastHandshakeMs;
+        private readonly byte[] _sendBuffer = new byte[MaxPacketSize];
 
         public UdpVoiceTransport(string host, int port, int clientId)
         {
@@ -72,10 +73,10 @@ namespace Client.Network
         public void SendAudio(byte[] opus, int len)
         {
             if (!IsConnected) return;
-            byte[] buf = new byte[HeaderSize + len];
-            WriteHeader(buf, 3, RoomId, ClientId, _outSeq++, NowMs(), len);
-            Buffer.BlockCopy(opus, 0, buf, HeaderSize, len);
-            TrySend(buf, buf.Length);
+            if (HeaderSize + len > _sendBuffer.Length) return;
+            WriteHeader(_sendBuffer, 3, RoomId, ClientId, _outSeq++, NowMs(), len);
+            Buffer.BlockCopy(opus, 0, _sendBuffer, HeaderSize, len);
+            TrySend(_sendBuffer, HeaderSize + len);
         }
 
         public void SendHeartbeat()
@@ -143,11 +144,18 @@ namespace Client.Network
                 case 3:
                     if (payloadLen > 0 && senderId != ClientId)
                     {
-                        byte[] opus = new byte[payloadLen];
-                        Buffer.BlockCopy(buf, HeaderSize, opus, 0, payloadLen);
-                        uint seq = BinaryPrimitives.ReadUInt32LittleEndian(buf.AsSpan(12, 4));
-                        long ts = BinaryPrimitives.ReadInt64LittleEndian(buf.AsSpan(16, 8));
-                        OnAudioReceived?.Invoke(senderId, opus, payloadLen, seq, ts);
+                        byte[] opus = System.Buffers.ArrayPool<byte>.Shared.Rent(payloadLen);
+                        try
+                        {
+                            Buffer.BlockCopy(buf, HeaderSize, opus, 0, payloadLen);
+                            uint seq = BinaryPrimitives.ReadUInt32LittleEndian(buf.AsSpan(12, 4));
+                            long ts = BinaryPrimitives.ReadInt64LittleEndian(buf.AsSpan(16, 8));
+                            OnAudioReceived?.Invoke(senderId, opus, payloadLen, seq, ts);
+                        }
+                        finally
+                        {
+                            System.Buffers.ArrayPool<byte>.Shared.Return(opus);
+                        }
                     }
                     break;
                 case 4:

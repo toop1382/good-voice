@@ -43,6 +43,7 @@ namespace Client.Audio
 
         private readonly int _framesPerBuffer;
         private float[] _captureBuffer;
+        private float[] _slicedCaptureBuffer;
         private Thread _captureThread;
         private CancellationTokenSource _cts;
         private bool _initialized;
@@ -114,9 +115,20 @@ namespace Client.Audio
                 {
                     // Slice to actual samples read
                     int samplesRead = framesRead * Channels;
-                    float[] outBuf = samplesRead == bufferSamples
-                        ? _captureBuffer
-                        : _captureBuffer[..samplesRead];
+                    float[] outBuf;
+                    if (samplesRead == bufferSamples)
+                    {
+                        outBuf = _captureBuffer;
+                    }
+                    else
+                    {
+                        if (_slicedCaptureBuffer == null || _slicedCaptureBuffer.Length != samplesRead)
+                        {
+                            _slicedCaptureBuffer = new float[samplesRead];
+                        }
+                        Array.Copy(_captureBuffer, 0, _slicedCaptureBuffer, 0, samplesRead);
+                        outBuf = _slicedCaptureBuffer;
+                    }
                     OnAudioFrameCaptured?.Invoke(outBuf);
                 }
                 else

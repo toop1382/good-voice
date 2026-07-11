@@ -16,6 +16,10 @@ namespace Client.Audio
         // writes are not of older indices
         public int FirstIndex { get; private set; } = -1;
 
+        private readonly float[] _singleSegZeroBuffer;
+        private readonly float[] _allSegZeroBuffer;
+        private readonly float[] _writeScratchBuffer;
+
         /// <summary>
         /// Create an instance
         /// </summary>
@@ -31,6 +35,10 @@ namespace Client.Audio
             SegDataLen = segDataLen;
             SegCount = segCount;
             FirstIndex = -1;
+
+            _singleSegZeroBuffer = new float[segDataLen];
+            _allSegZeroBuffer = new float[segDataLen * segCount];
+            _writeScratchBuffer = new float[segDataLen];
 
             // In Unity, AudioClip.Create length is in sample frames (samples per channel)
             int totalSamples = segDataLen * segCount;
@@ -59,8 +67,8 @@ namespace Client.Audio
         /// Feed an audio segment to the buffer.
         /// </summary>
         public bool Write(int absoluteIndex, float[] audioSegment) {
-            // Reject if the segment length is wrong
-            if (audioSegment.Length != SegDataLen) return false;
+            // Reject if the segment is too small
+            if (audioSegment.Length < SegDataLen) return false;
 
             // Reject if the index is older than our starting point
             if (absoluteIndex < 0 || (FirstIndex != -1 && absoluteIndex < FirstIndex)) return false;
@@ -74,7 +82,8 @@ namespace Client.Audio
             // Set the segment at the clip data at the right index
             if (localIndex >= 0) {
                 int offsetSamples = localIndex * (SegDataLen / Channels);
-                AudioClip.SetData(audioSegment, offsetSamples);
+                System.Array.Copy(audioSegment, 0, _writeScratchBuffer, 0, SegDataLen);
+                AudioClip.SetData(_writeScratchBuffer, offsetSamples);
                 return true;
             }
             return false;
@@ -98,7 +107,7 @@ namespace Client.Audio
             if (localIndex < 0) return false;
 
             int offsetSamples = localIndex * (SegDataLen / Channels);
-            AudioClip.SetData(new float[SegDataLen], offsetSamples);
+            AudioClip.SetData(_singleSegZeroBuffer, offsetSamples);
             return true;
         }
 
@@ -106,7 +115,7 @@ namespace Client.Audio
         /// Clear the entire buffer
         /// </summary>
         public void Clear() {
-            AudioClip.SetData(new float[SegDataLen * SegCount], 0);
+            AudioClip.SetData(_allSegZeroBuffer, 0);
             FirstIndex = -1;
         }
 

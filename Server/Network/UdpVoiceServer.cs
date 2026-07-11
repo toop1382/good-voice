@@ -28,6 +28,7 @@ namespace Server.Network
     public class UdpVoiceServer : IVoiceServer
     {
         private readonly int _port;
+        private readonly RoomManager _roomManager;
         private readonly Socket _socket;
         private readonly Channel<InboundPacket> _packetChannel;
         private readonly PacketRouter _packetRouter;
@@ -40,6 +41,7 @@ namespace Server.Network
         public UdpVoiceServer(int port, RoomManager roomManager)
         {
             _port = port;
+            _roomManager = roomManager;
             _packetRouter = new PacketRouter(roomManager);
             _socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
             _socket.ReceiveBufferSize = 1024 * 1024 * 8;
@@ -110,8 +112,17 @@ namespace Server.Network
                         {
                             if (pkt.RemoteEndPoint is IPEndPoint ip)
                             {
-                                // Create a per-packet UDP send channel for this source endpoint
-                                var channel = new UdpSendChannel(_socket, ip);
+                                ISendChannel? channel = null;
+                                if (_roomManager.TryGetSessionByEndPoint(ip, out var session) && session != null)
+                                {
+                                    channel = session.SendChannel;
+                                }
+
+                                if (channel == null)
+                                {
+                                    channel = new UdpSendChannel(_socket, ip);
+                                }
+
                                 _packetRouter.RoutePacket(pkt.RawBuffer, pkt.BytesReceived, ip, channel, pkt.ReceiveTimestampMs);
                             }
                         }
