@@ -1,0 +1,6 @@
+{
+    "name": "Shared",
+    "defineConstraints": [
+        "DISABLE_UNITY_COMPILATION"
+    ]
+}

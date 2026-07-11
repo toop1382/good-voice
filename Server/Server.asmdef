@@ -1,0 +1,6 @@
+{
+    "name": "Server",
+    "defineConstraints": [
+        "DISABLE_UNITY_COMPILATION"
+    ]
+}

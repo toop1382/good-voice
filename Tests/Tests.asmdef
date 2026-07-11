@@ -1,0 +1,6 @@
+{
+    "name": "Tests",
+    "defineConstraints": [
+        "DISABLE_UNITY_COMPILATION"
+    ]
+}

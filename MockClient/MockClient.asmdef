@@ -1,0 +1,6 @@
+{
+    "name": "MockClient",
+    "defineConstraints": [
+        "DISABLE_UNITY_COMPILATION"
+    ]
+}
