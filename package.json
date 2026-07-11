@@ -1,0 +1,11 @@
+{
+  "name": "com.goodvoice.voicechat",
+  "version": "1.0.0",
+  "displayName": "GoodVoice Chat",
+  "description": "A low-latency, multi-protocol voice chat package for Unity with state-of-the-art diagnostics.",
+  "unity": "2021.3",
+  "author": {
+    "name": "GoodVoice"
+  },
+  "dependencies": {}
+}
