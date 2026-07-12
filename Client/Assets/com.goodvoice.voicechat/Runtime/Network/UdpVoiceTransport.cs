@@ -117,7 +117,7 @@ namespace Client.Network
             _lastHandshakeMs = NowMs();
             byte[] metadataBytes = System.Text.Encoding.UTF8.GetBytes(metadata ?? string.Empty);
             byte[] buf = new byte[HeaderSize + metadataBytes.Length];
-            WriteHeader(buf, 1, 0, ClientId, 0, _lastHandshakeMs, metadataBytes.Length);
+            WriteHeader(buf, 1, 0, 0, 0, _lastHandshakeMs, metadataBytes.Length);
             System.Buffer.BlockCopy(metadataBytes, 0, buf, HeaderSize, metadataBytes.Length);
             await _socket.SendToAsync(new ArraySegment<byte>(buf), SocketFlags.None, _serverEP);
         }

@@ -10,6 +10,19 @@ namespace Server.Core
         private readonly ConcurrentDictionary<int, VoiceRoom> _rooms = new();
         private readonly ConcurrentDictionary<int, ClientSession> _sessions = new();
         private readonly ConcurrentDictionary<string, ClientSession> _endpointSessions = new();
+        private int _nextClientId = 100000;
+
+        public int GenerateUniqueClientId()
+        {
+            while (true)
+            {
+                int id = System.Threading.Interlocked.Increment(ref _nextClientId);
+                if (!_sessions.ContainsKey(id))
+                {
+                    return id;
+                }
+            }
+        }
 
         // ── Room helpers ──────────────────────────────────────────────────
         public VoiceRoom GetOrCreateRoom(int roomId) =>

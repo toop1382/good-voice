@@ -3,9 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 11.00
 # Visual Studio 2010
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Unity.Rider.Editor", "Unity.Rider.Editor.csproj", "{25ade108-912d-7485-4125-aac4e3673b6a}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Unity.Multiplayer.Center.Editor", "Unity.Multiplayer.Center.Editor.csproj", "{4f504fd3-4ac3-4f7b-9709-862fe640ab62}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Unity.Mobile.AndroidLogcat.Editor", "Unity.Mobile.AndroidLogcat.Editor.csproj", "{a7bc5e37-ff85-a288-ef06-522a32df9bef}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Unity.Multiplayer.Center.Editor", "Unity.Multiplayer.Center.Editor.csproj", "{4f504fd3-4ac3-4f7b-9709-862fe640ab62}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Unity.Multiplayer.Center.Common", "Unity.Multiplayer.Center.Common.csproj", "{1bc7088f-33af-74fe-283e-4a6dbcf3bb2b}"
 EndProject
@@ -52,10 +52,10 @@ Global
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{25ade108-912d-7485-4125-aac4e3673b6a}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{25ade108-912d-7485-4125-aac4e3673b6a}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{4f504fd3-4ac3-4f7b-9709-862fe640ab62}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{4f504fd3-4ac3-4f7b-9709-862fe640ab62}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{a7bc5e37-ff85-a288-ef06-522a32df9bef}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{a7bc5e37-ff85-a288-ef06-522a32df9bef}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4f504fd3-4ac3-4f7b-9709-862fe640ab62}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4f504fd3-4ac3-4f7b-9709-862fe640ab62}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1bc7088f-33af-74fe-283e-4a6dbcf3bb2b}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{1bc7088f-33af-74fe-283e-4a6dbcf3bb2b}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3d6d4948-7714-0cbb-4127-5ee6dc42aba1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU

@@ -65,7 +65,7 @@ namespace Server.Core
             int clientId = header.ClientId;
             if (clientId == 0)
             {
-                clientId = Random.Shared.Next(100000, 999999999);
+                clientId = _roomManager.GenerateUniqueClientId();
             }
             var session = _roomManager.RegisterClient(clientId, senderEndPoint, senderChannel);
             if (header.PayloadLength > 0 && length >= VoicePacketHeader.HeaderSize + header.PayloadLength)

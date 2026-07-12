@@ -122,7 +122,7 @@ namespace Client.Network
         {
             _lastHandshakeMs = NowMs();
             byte[] buf = new byte[HeaderSize];
-            WriteHeader(buf, 1, 0, ClientId, 0, _lastHandshakeMs, 0);
+            WriteHeader(buf, 1, 0, 0, 0, _lastHandshakeMs, 0);
             TrySend(buf, HeaderSize);
         }
 

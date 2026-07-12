@@ -47,8 +47,8 @@
     <Analyzer Include="H:\Idrive\unity\New folder\6000.0.23f1\Editor\Data\Tools\Unity.SourceGenerators\Unity.UIToolkit.SourceGenerator.dll" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Assets\com.goodvoice.voicechat\Runtime\UnityMainThreadDispatcher.cs" />
     <Compile Include="Assets\com.goodvoice.voicechat\Runtime\Audio\CircularAudioClip.cs" />
+    <Compile Include="Assets\com.goodvoice.voicechat\Runtime\UnityMainThreadDispatcher.cs" />
     <Compile Include="Assets\com.goodvoice.voicechat\Runtime\Diagnostics\DiagnosticsCollector.cs" />
     <Compile Include="Assets\com.goodvoice.voicechat\Runtime\Codec\OpusEncoder.cs" />
     <Compile Include="Assets\com.goodvoice.voicechat\Runtime\Diagnostics\DiagnosticsUI.cs" />

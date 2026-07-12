@@ -127,7 +127,7 @@ namespace Client.Network
             byte[] buf = new byte[HeaderSize];
             long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             _lastHandshakeSendMs = now;
-            WriteHeader(buf, packetType: 1, roomId: 0, ClientId, seq: 0, now, payloadLen: 0);
+            WriteHeader(buf, packetType: 1, roomId: 0, 0, seq: 0, now, payloadLen: 0);
             await _socket.SendToAsync(new ArraySegment<byte>(buf), SocketFlags.None, _serverEndPoint);
         }
 

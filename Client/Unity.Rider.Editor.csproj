@@ -48,6 +48,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Library\PackageCache\com.unity.ide.rider\Rider\Editor\PostProcessors\RiderAssetPostprocessor.cs" />
+    <Compile Include="Library\PackageCache\com.unity.ide.rider\Rider\Editor\UnitTesting\RiderTestRunner.cs" />
     <Compile Include="Library\PackageCache\com.unity.ide.rider\Rider\Editor\ProjectGeneration\GUIDProvider.cs" />
     <Compile Include="Library\PackageCache\com.unity.ide.rider\Rider\Editor\LoggingLevel.cs" />
     <Compile Include="Library\PackageCache\com.unity.ide.rider\Rider\Editor\ProjectGeneration\IGenerator.cs" />
@@ -88,7 +89,6 @@
     <Compile Include="Library\PackageCache\com.unity.ide.rider\Rider\Editor\RiderScriptEditor.cs" />
     <Compile Include="Library\PackageCache\com.unity.ide.rider\Rider\Editor\Util\RiderMenu.cs" />
     <Compile Include="Library\PackageCache\com.unity.ide.rider\Rider\Editor\Util\StringBuilderExtensions.cs" />
-    <Compile Include="Library\PackageCache\com.unity.ide.rider\Rider\Editor\UnitTesting\RiderTestRunner.cs" />
     <None Include="Library\PackageCache\com.unity.ide.rider\Rider\Editor\com.unity.ide.rider.asmdef" />
     <Reference Include="UnityEngine">
       <HintPath>H:\Idrive\unity\New folder\6000.0.23f1\Editor\Data\Managed\UnityEngine\UnityEngine.dll</HintPath>
