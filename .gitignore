@@ -42,3 +42,8 @@ Client/Recordings/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+FlutterClient/goodvoice_flutter/
+!FlutterClient/goodvoice_flutter/lib/
+!FlutterClient/goodvoice_flutter/pubspec.yaml
+!FlutterClient/goodvoice_flutter/pubspec.lock
