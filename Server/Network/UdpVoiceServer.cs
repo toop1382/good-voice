@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using System.Runtime.InteropServices;
 using Server.Core;
 
 namespace Server.Network
@@ -15,13 +16,15 @@ namespace Server.Network
         public int BytesReceived { get; }
         public EndPoint RemoteEndPoint { get; }
         public long ReceiveTimestampMs { get; }
+        public Socket ReceiverSocket { get; }
 
-        public InboundPacket(byte[] rawBuffer, int bytesReceived, EndPoint remoteEndPoint, long receiveTimestampMs)
+        public InboundPacket(byte[] rawBuffer, int bytesReceived, EndPoint remoteEndPoint, long receiveTimestampMs, Socket receiverSocket)
         {
             RawBuffer = rawBuffer;
             BytesReceived = bytesReceived;
             RemoteEndPoint = remoteEndPoint;
             ReceiveTimestampMs = receiveTimestampMs;
+            ReceiverSocket = receiverSocket;
         }
     }
 
@@ -29,7 +32,7 @@ namespace Server.Network
     {
         private readonly int _port;
         private readonly RoomManager _roomManager;
-        private readonly Socket _socket;
+        private readonly Socket[] _sockets;
         private readonly Channel<InboundPacket> _packetChannel;
         private readonly PacketRouter _packetRouter;
         private const int MaxPacketSize = 2048;
@@ -43,11 +46,21 @@ namespace Server.Network
             _port = port;
             _roomManager = roomManager;
             _packetRouter = new PacketRouter(roomManager);
-            _socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            _socket.ReceiveBufferSize = 1024 * 1024 * 8;
-            _socket.SendBufferSize    = 1024 * 1024 * 8;
 
-            var opts = new UnboundedChannelOptions { SingleWriter = true, AllowSynchronousContinuations = false };
+            int workers = Environment.ProcessorCount;
+            _sockets = new Socket[workers];
+            for (int i = 0; i < workers; i++) {
+                _sockets[i] = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+                _sockets[i].ReceiveBufferSize = 1024 * 1024 * 8;
+                _sockets[i].SendBufferSize    = 1024 * 1024 * 8;
+                _sockets[i].SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) {
+                    // SO_REUSEPORT
+                    try { _sockets[i].SetSocketOption(SocketOptionLevel.Socket, (SocketOptionName)15, true); } catch { }
+                }
+            }
+
+            var opts = new UnboundedChannelOptions { SingleWriter = false, AllowSynchronousContinuations = false };
             _packetChannel = Channel.CreateUnbounded<InboundPacket>(opts);
         }
 
@@ -56,15 +69,19 @@ namespace Server.Network
             if (_started) return;
             _started = true;
             _cts = new CancellationTokenSource();
-            _socket.Bind(new IPEndPoint(IPAddress.Any, _port));
+
+            var endPoint = new IPEndPoint(IPAddress.Any, _port);
+            for (int i = 0; i < _sockets.Length; i++) {
+                _sockets[i].Bind(endPoint);
+            }
             Console.WriteLine($"[UDP] Listening on port {_port}");
 
             var ct = _cts.Token;
-            _ = Task.Run(() => RunReceiveLoopAsync(ct), ct);
-            int workers = Environment.ProcessorCount;
-            for (int i = 0; i < workers; i++)
+            for (int i = 0; i < _sockets.Length; i++)
+                _ = Task.Run(() => RunReceiveLoopAsync(_sockets[i], ct), ct);
+            for (int i = 0; i < _sockets.Length; i++)
                 _ = Task.Run(() => RunWorkerLoopAsync(ct), ct);
-            Console.WriteLine($"[UDP] Started {workers} packet-routing workers");
+            Console.WriteLine($"[UDP] Started {_sockets.Length} packet-routing workers with SO_REUSEPORT");
         }
 
         public void Stop()
@@ -73,13 +90,15 @@ namespace Server.Network
             _started = false;
             _cts?.Cancel();
             _packetChannel.Writer.Complete();
-            try { _socket.Close(); } catch { }
+            for (int i = 0; i < _sockets.Length; i++) {
+                try { _sockets[i].Close(); } catch { }
+            }
             _cts?.Dispose();
             _cts = null;
             Console.WriteLine("[UDP] Server stopped");
         }
 
-        private async Task RunReceiveLoopAsync(CancellationToken ct)
+        private async Task RunReceiveLoopAsync(Socket socket, CancellationToken ct)
         {
             EndPoint remote = new IPEndPoint(IPAddress.Any, 0);
             while (!ct.IsCancellationRequested)
@@ -87,9 +106,9 @@ namespace Server.Network
                 byte[] buf = ArrayPool<byte>.Shared.Rent(MaxPacketSize);
                 try
                 {
-                    var result = await _socket.ReceiveFromAsync(new Memory<byte>(buf), SocketFlags.None, remote, ct);
+                    var result = await socket.ReceiveFromAsync(new Memory<byte>(buf), SocketFlags.None, remote, ct);
                     long ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                    var pkt = new InboundPacket(buf, result.ReceivedBytes, result.RemoteEndPoint, ts);
+                    var pkt = new InboundPacket(buf, result.ReceivedBytes, result.RemoteEndPoint, ts, socket);
                     if (!_packetChannel.Writer.TryWrite(pkt))
                         ArrayPool<byte>.Shared.Return(buf);
                 }
@@ -120,7 +139,7 @@ namespace Server.Network
 
                                 if (channel == null)
                                 {
-                                    channel = new UdpSendChannel(_socket, ip);
+                                    channel = new UdpSendChannel(pkt.ReceiverSocket, ip);
                                 }
 
                                 _packetRouter.RoutePacket(pkt.RawBuffer, pkt.BytesReceived, ip, channel, pkt.ReceiveTimestampMs);
