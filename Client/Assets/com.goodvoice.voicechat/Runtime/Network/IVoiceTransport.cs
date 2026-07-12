@@ -14,7 +14,7 @@ namespace Client.Network
         string Protocol { get; }
 
         bool IsConnected { get; }
-        int ClientId { get; }
+        int ClientId { get; set; }
         int RoomId { get; }
 
         // ── Events (fired on receive thread — marshal to main thread as needed) ──
@@ -27,7 +27,7 @@ namespace Client.Network
         event Action<int>              OnUserLeft;         // (clientId)
 
         // ── Control ──────────────────────────────────────────────────────
-        Task<bool> ConnectAsync(CancellationToken cancellationToken = default);
+        Task<bool> ConnectAsync(string metadata = "", CancellationToken cancellationToken = default);
         void JoinRoom(int roomId, string metadata = "");
         void SendAudio(byte[] opusData, int opusLength);
         void SendHeartbeat();

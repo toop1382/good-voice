@@ -19,7 +19,7 @@ namespace Client.Network
 
         public string Protocol      => "UDP";
         public bool   IsConnected   { get; private set; }
-        public int    ClientId      { get; }
+        public int    ClientId      { get; set; }
         public int    RoomId        { get; private set; }
 
         public event Action<int, byte[], int, uint, long> OnAudioReceived;
@@ -35,6 +35,7 @@ namespace Client.Network
         private Socket          _socket;
         private IPEndPoint      _serverEP;
         private CancellationTokenSource _cts;
+        private TaskCompletionSource<bool> _handshakeTcs;
         private uint  _outSeq;
         private long  _lastHandshakeMs;
         private readonly byte[] _sendBuffer = new byte[MaxPacketSize];
@@ -44,7 +45,7 @@ namespace Client.Network
             _host = host; _port = port; ClientId = clientId;
         }
 
-        public async Task<bool> ConnectAsync(CancellationToken ct = default)
+        public async Task<bool> ConnectAsync(string metadata = "", CancellationToken ct = default)
         {
             try
             {
@@ -55,8 +56,18 @@ namespace Client.Network
                 _socket.SendBufferSize    = 512 * 1024;
                 _socket.Bind(new IPEndPoint(IPAddress.Any, 0));
                 _cts = new CancellationTokenSource();
+                _handshakeTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 _ = Task.Run(() => ReceiveLoopAsync(_cts.Token));
-                await SendHandshakeAsync();
+                await SendHandshakeAsync(metadata);
+
+                var timeoutTask = Task.Delay(5000, ct);
+                if (await Task.WhenAny(_handshakeTcs.Task, timeoutTask) == timeoutTask)
+                {
+                    Disconnect();
+                    throw new TimeoutException("Handshake timed out.");
+                }
+
+                await _handshakeTcs.Task;
                 IsConnected = true;
                 Debug.Log($"[UdpTransport] Connected to {_host}:{_port} as client {ClientId}");
                 return true;
@@ -101,11 +112,13 @@ namespace Client.Network
             try { _socket?.Close(); } catch { }
         }
 
-        private async Task SendHandshakeAsync()
+        private async Task SendHandshakeAsync(string metadata)
         {
-            byte[] buf = new byte[HeaderSize];
             _lastHandshakeMs = NowMs();
-            WriteHeader(buf, 1, 0, ClientId, 0, _lastHandshakeMs, 0);
+            byte[] metadataBytes = System.Text.Encoding.UTF8.GetBytes(metadata ?? string.Empty);
+            byte[] buf = new byte[HeaderSize + metadataBytes.Length];
+            WriteHeader(buf, 1, 0, ClientId, 0, _lastHandshakeMs, metadataBytes.Length);
+            System.Buffer.BlockCopy(metadataBytes, 0, buf, HeaderSize, metadataBytes.Length);
             await _socket.SendToAsync(new ArraySegment<byte>(buf), SocketFlags.None, _serverEP);
         }
 
@@ -141,6 +154,8 @@ namespace Client.Network
             switch (pktType)
             {
                 case 1:
+                    ClientId = senderId;
+                    _handshakeTcs?.TrySetResult(true);
                     double rtt = NowMs() - _lastHandshakeMs;
                     OnHandshakeAck?.Invoke(rtt);
                     break;

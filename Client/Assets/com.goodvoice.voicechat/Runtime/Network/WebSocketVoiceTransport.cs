@@ -23,7 +23,7 @@ namespace Client.Network
 
         public string Protocol    => "WebSocket";
         public bool   IsConnected { get; private set; }
-        public int    ClientId    { get; }
+        public int    ClientId    { get; set; }
         public int    RoomId      { get; private set; }
 
         public event Action<int, byte[], int, uint, long> OnAudioReceived;
@@ -40,6 +40,7 @@ namespace Client.Network
         private readonly ConcurrentQueue<byte[]> _sendQueue = new();
         private readonly SemaphoreSlim _queueSignal = new(0);
         private Task _sendLoopTask;
+        private TaskCompletionSource<bool> _handshakeTcs;
         private uint  _outSeq;
         private long  _lastHandshakeMs;
 
@@ -49,7 +50,7 @@ namespace Client.Network
             ClientId = clientId;
         }
 
-        public async Task<bool> ConnectAsync(CancellationToken ct = default)
+        public async Task<bool> ConnectAsync(string metadata = "", CancellationToken ct = default)
         {
             try
             {
@@ -57,10 +58,20 @@ namespace Client.Network
                  _ws.Options.SetBuffer(receiveBufferSize: 256 * 1024, sendBufferSize: 256 * 1024);
                  await _ws.ConnectAsync(new Uri(_url), ct);
                  _cts = new CancellationTokenSource();
+                 _handshakeTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                  IsConnected = true;
                  _ = Task.Run(() => ReceiveLoopAsync(_cts.Token));
                  _sendLoopTask = Task.Run(() => SendLoopAsync(_cts.Token));
-                 SendHandshake();
+                 SendHandshake(metadata);
+
+                 var handshakeTimeoutTask = Task.Delay(5000, ct);
+                 if (await Task.WhenAny(_handshakeTcs.Task, handshakeTimeoutTask) == handshakeTimeoutTask)
+                 {
+                     Disconnect();
+                     throw new TimeoutException("Handshake timed out.");
+                 }
+
+                 await _handshakeTcs.Task;
                  Debug.Log($"[WsTransport] Connected to {_url} as client {ClientId}");
                  return true;
             }
@@ -107,7 +118,7 @@ namespace Client.Network
             catch { }
         }
 
-        private void SendHandshake()
+        private void SendHandshake(string metadata)
         {
             _lastHandshakeMs = NowMs();
             byte[] buf = new byte[HeaderSize];
@@ -153,6 +164,8 @@ namespace Client.Network
             switch (pktType)
             {
                 case 1:
+                    ClientId = senderId;
+                    _handshakeTcs?.TrySetResult(true);
                     OnHandshakeAck?.Invoke(NowMs() - _lastHandshakeMs);
                     break;
                 case 2:

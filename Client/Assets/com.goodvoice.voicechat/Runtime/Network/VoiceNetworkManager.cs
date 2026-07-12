@@ -82,6 +82,7 @@ namespace Client.Network
         private OpusEncoder _encoder;
         private readonly Dictionary<int, OpusDecoder> _decoders = new();
         private readonly Dictionary<int, long> _lastReceiveTimeMs = new();
+        private readonly Dictionary<int, long> _lastSpeakEventTimeMs = new();
         private readonly List<int> _timedOutClients = new();
         private byte[] _encodeOutputBuf;
         private bool _isMuted;
@@ -95,11 +96,6 @@ namespace Client.Network
 
         private void Awake()
         {
-            if (ClientId == 0)
-            {
-                ClientId = UnityEngine.Random.Range(100000, 999999999);
-                Debug.Log($"[VoiceNetworkManager] Auto-generated ClientId: {ClientId}");
-            }
             _encodeOutputBuf = new byte[4000];
             _diagnostics = new DiagnosticsCollector();
 
@@ -175,7 +171,7 @@ namespace Client.Network
             _lastServerHeartbeatTimeMs = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             _heartbeatTimer = 0f;
 
-            bool ok = await _transport.ConnectAsync();
+            bool ok = await _transport.ConnectAsync(UserMetadata);
             if (!ok)
             {
                 UnityMainThreadDispatcher.Enqueue(() =>
@@ -188,6 +184,7 @@ namespace Client.Network
                 return;
             }
 
+            ClientId = _transport.ClientId;
             UnityMainThreadDispatcher.Enqueue(() =>
             {
                 lock (_audioLock)
@@ -351,9 +348,24 @@ namespace Client.Network
                 System.Buffers.ArrayPool<float>.Shared.Return(pcm);
             }
 
-            UnityMainThreadDispatcher.Enqueue(() => {
-                OnUserSpeaking?.Invoke(senderId);
-            });
+            long now = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            bool shouldFireEvent = false;
+
+            lock (_lastSpeakEventTimeMs)
+            {
+                if (!_lastSpeakEventTimeMs.TryGetValue(senderId, out long lastSpeak) || now - lastSpeak > 250) // 250ms debounce
+                {
+                    _lastSpeakEventTimeMs[senderId] = now;
+                    shouldFireEvent = true;
+                }
+            }
+
+            if (shouldFireEvent)
+            {
+                UnityMainThreadDispatcher.Enqueue(() => {
+                    OnUserSpeaking?.Invoke(senderId);
+                });
+            }
         }
 
         private void OnDisconnect()
@@ -410,6 +422,11 @@ namespace Client.Network
                     foreach (var d in _decoders.Values) d?.Dispose();
                     _decoders.Clear();
                     _lastReceiveTimeMs.Clear();
+                }
+
+                lock (_lastSpeakEventTimeMs)
+                {
+                    _lastSpeakEventTimeMs.Clear();
                 }
 
                 if (_transport != null)
@@ -487,6 +504,14 @@ namespace Client.Network
 
                     _playback?.RemoveClient(clientId);
                     _diagnostics?.RemoveClient(clientId);
+                }
+            }
+
+            lock (_lastSpeakEventTimeMs)
+            {
+                foreach (int clientId in _timedOutClients)
+                {
+                    _lastSpeakEventTimeMs.Remove(clientId);
                 }
             }
         }
