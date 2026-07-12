@@ -136,7 +136,8 @@ cmake --build build-android
 2. Create a persistent empty GameObject named `VoiceSystem`
 3. Add these MonoBehaviours:
    - `UnityMainThreadDispatcher`
-   - `VoiceNetworkManager` (configure `ServerHost`, `ServerPort`, `ClientId`, `RoomId`)
+   - `VoiceNetworkManager` (configure `ServerHost`, `ServerPort`, `ClientId`, `RoomId`, `UserMetadata`)
+   - Check the [DEPLOYMENT.md](DEPLOYMENT.md) for more details on setup and metadata.
    - `DiagnosticsUI` (drag `VoiceNetworkManager` reference in)
 4. Press **F1** in-game to toggle the diagnostics overlay
 5. In **Player Settings → Android**, enable `INTERNET` permission

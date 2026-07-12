@@ -108,6 +108,7 @@ namespace Server.Core
                 if (_rooms.TryGetValue(currentRoomId, out var room))
                 {
                     room.TryRemove(session.ClientId, out _);
+                    room.BroadcastUserLeft(session.ClientId);
                     session.RoomId = 0;
                     if (room.ClientCount == 0) _rooms.TryRemove(currentRoomId, out _);
                     return true;

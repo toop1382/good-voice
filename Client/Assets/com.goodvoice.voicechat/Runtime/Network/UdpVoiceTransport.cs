@@ -27,6 +27,8 @@ namespace Client.Network
         public event Action<bool>             OnRoomJoinAck;
         public event Action                   OnDisconnected;
         public event Action<double>           OnHeartbeatAck;
+        public event Action<int, string>      OnUserJoined;
+        public event Action<int>              OnUserLeft;
 
         private readonly string _host;
         private readonly int    _port;
@@ -62,12 +64,17 @@ namespace Client.Network
             catch (Exception ex) { Debug.LogError($"[UdpTransport] Connect failed: {ex.Message}"); return false; }
         }
 
-        public void JoinRoom(int roomId)
+        public void JoinRoom(int roomId, string metadata = "")
         {
             RoomId = roomId;
-            byte[] buf = new byte[HeaderSize];
-            WriteHeader(buf, 2, roomId, ClientId, _outSeq++, NowMs(), 0);
-            TrySend(buf, HeaderSize);
+            byte[] metadataBytes = System.Text.Encoding.UTF8.GetBytes(metadata ?? string.Empty);
+            int len = HeaderSize + metadataBytes.Length;
+            if (len > MaxPacketSize) len = MaxPacketSize; // Simple bounds check
+            byte[] buf = new byte[len];
+            int payloadLen = len - HeaderSize;
+            WriteHeader(buf, 2, roomId, ClientId, _outSeq++, NowMs(), payloadLen);
+            System.Buffer.BlockCopy(metadataBytes, 0, buf, HeaderSize, payloadLen);
+            TrySend(buf, len);
         }
 
         public void SendAudio(byte[] opus, int len)
@@ -162,6 +169,16 @@ namespace Client.Network
                     long heartbeatTs = BinaryPrimitives.ReadInt64LittleEndian(buf.AsSpan(16, 8));
                     double heartbeatRtt = NowMs() - heartbeatTs;
                     OnHeartbeatAck?.Invoke(heartbeatRtt);
+                    break;
+                case 5:
+                    if (payloadLen >= 0)
+                    {
+                        string metadata = System.Text.Encoding.UTF8.GetString(buf, HeaderSize, payloadLen);
+                        OnUserJoined?.Invoke(senderId, metadata);
+                    }
+                    break;
+                case 6:
+                    OnUserLeft?.Invoke(senderId);
                     break;
             }
         }

@@ -23,10 +23,12 @@ namespace Client.Network
         event Action<bool>             OnRoomJoinAck;      // (success)
         event Action                   OnDisconnected;
         event Action<double>           OnHeartbeatAck;
+        event Action<int, string>      OnUserJoined;       // (clientId, metadata)
+        event Action<int>              OnUserLeft;         // (clientId)
 
         // ── Control ──────────────────────────────────────────────────────
         Task<bool> ConnectAsync(CancellationToken cancellationToken = default);
-        void JoinRoom(int roomId);
+        void JoinRoom(int roomId, string metadata = "");
         void SendAudio(byte[] opusData, int opusLength);
         void SendHeartbeat();
         void Disconnect();

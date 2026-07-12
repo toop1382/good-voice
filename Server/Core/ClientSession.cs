@@ -36,6 +36,8 @@ namespace Server.Core
         /// </summary>
         public volatile ISendChannel? SendChannel;
 
+        public string Metadata { get; set; } = string.Empty;
+
         public ClientSession(int clientId, IPEndPoint endPoint, ISendChannel? sendChannel = null)
         {
             ClientId = clientId;

@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Net;
 using Shared.Models;
 using Shared.Serialization;
+using System.Text;
 
 namespace Server.Core
 {
@@ -47,7 +48,7 @@ namespace Server.Core
             switch (header.PacketType)
             {
                 case 1: HandleHandshake(header, senderEndPoint, senderChannel, serverReceiveTimestampMs); break;
-                case 2: HandleRoomJoin(header, senderEndPoint, senderChannel); break;
+                case 2: HandleRoomJoin(header, buffer, length, senderEndPoint, senderChannel); break;
                 case 3: HandleAudio(header, buffer, length, senderEndPoint); break;
                 case 4: HandleHeartbeat(header, senderEndPoint, senderChannel); break;
             }
@@ -83,6 +84,8 @@ namespace Server.Core
         // ── Room Join ────────────────────────────────────────────────────
         private void HandleRoomJoin(
             in VoicePacketHeader header,
+            byte[] buffer,
+            int length,
             IPEndPoint senderEndPoint,
             ISendChannel senderChannel)
         {
@@ -94,7 +97,13 @@ namespace Server.Core
                 return;
 
             session.LastActivityTicks = DateTime.UtcNow.Ticks;
-            bool success = _roomManager.JoinRoom(clientId, roomId, out _);
+
+            if (header.PayloadLength > 0 && length >= VoicePacketHeader.HeaderSize + header.PayloadLength)
+            {
+                session.Metadata = Encoding.UTF8.GetString(buffer, VoicePacketHeader.HeaderSize, header.PayloadLength);
+            }
+
+            bool success = _roomManager.JoinRoom(clientId, roomId, out var room);
 
             byte[] ackBuf = new byte[VoicePacketHeader.HeaderSize + 4];
             var ackHeader = new VoicePacketHeader(
@@ -107,6 +116,12 @@ namespace Server.Core
             BinaryPrimitives.WriteInt32LittleEndian(ackBuf.AsSpan(VoicePacketHeader.HeaderSize, 4), success ? 1 : 0);
 
             senderChannel.Send(ackBuf, ackBuf.Length);
+
+            if (success && room != null)
+            {
+                room.SendExistingUsersTo(session);
+                room.BroadcastUserJoined(session);
+            }
             Console.WriteLine($"[{senderChannel.Protocol}] Client {clientId} joined room {roomId} (success={success})");
         }
 

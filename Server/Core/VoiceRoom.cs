@@ -1,6 +1,10 @@
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net.Sockets;
+using System.Text;
+using Shared.Models;
+using Shared.Serialization;
 
 namespace Server.Core
 {
@@ -40,6 +44,78 @@ namespace Server.Core
                 if (channel == null || !channel.IsAlive) continue;
 
                 channel.Send(packetBuffer, 0, length);
+            }
+        }
+
+        private readonly object _joinLock = new object();
+
+        public void BroadcastUserJoined(ClientSession joinedSession)
+        {
+            lock (_joinLock)
+            {
+                byte[] metadataBytes = Encoding.UTF8.GetBytes(joinedSession.Metadata ?? string.Empty);
+            byte[] packetBuffer = new byte[VoicePacketHeader.HeaderSize + metadataBytes.Length];
+
+            var header = new VoicePacketHeader(
+                packetType: 5,
+                roomId: RoomId,
+                clientId: joinedSession.ClientId,
+                sequenceNumber: 0,
+                sendTimestamp: DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond,
+                payloadLength: metadataBytes.Length
+            );
+
+            PacketSerializer.TrySerializeHeader(header, packetBuffer.AsSpan());
+            Buffer.BlockCopy(metadataBytes, 0, packetBuffer, VoicePacketHeader.HeaderSize, metadataBytes.Length);
+
+            Broadcast(packetBuffer, packetBuffer.Length, joinedSession.ClientId);
+            }
+        }
+
+        public void BroadcastUserLeft(int clientId)
+        {
+            byte[] packetBuffer = new byte[VoicePacketHeader.HeaderSize];
+
+            var header = new VoicePacketHeader(
+                packetType: 6,
+                roomId: RoomId,
+                clientId: clientId,
+                sequenceNumber: 0,
+                sendTimestamp: DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond,
+                payloadLength: 0
+            );
+
+            PacketSerializer.TrySerializeHeader(header, packetBuffer.AsSpan());
+
+            Broadcast(packetBuffer, packetBuffer.Length, clientId);
+        }
+
+        public void SendExistingUsersTo(ClientSession newClient)
+        {
+            ISendChannel? channel = newClient.SendChannel;
+            if (channel == null || !channel.IsAlive) return;
+
+            foreach (var kvp in _clients)
+            {
+                ClientSession existingClient = kvp.Value;
+                if (existingClient.ClientId == newClient.ClientId) continue;
+
+                byte[] metadataBytes = Encoding.UTF8.GetBytes(existingClient.Metadata ?? string.Empty);
+                byte[] packetBuffer = new byte[VoicePacketHeader.HeaderSize + metadataBytes.Length];
+
+                var header = new VoicePacketHeader(
+                    packetType: 5,
+                    roomId: RoomId,
+                    clientId: existingClient.ClientId,
+                    sequenceNumber: 0,
+                    sendTimestamp: DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond,
+                    payloadLength: metadataBytes.Length
+                );
+
+                PacketSerializer.TrySerializeHeader(header, packetBuffer.AsSpan());
+                Buffer.BlockCopy(metadataBytes, 0, packetBuffer, VoicePacketHeader.HeaderSize, metadataBytes.Length);
+
+                channel.Send(packetBuffer, 0, packetBuffer.Length);
             }
         }
     }

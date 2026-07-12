@@ -35,9 +35,11 @@ namespace Client.Network
 
         [Header("Session")]
         [Tooltip("Unique numeric client ID for this Unity instance")]
-        public int ClientId = 1;
+        public int ClientId = 0;
         [Tooltip("Voice room to join on connect")]
         public int RoomId = 1;
+        [Tooltip("User metadata to share with others in the room")]
+        public string UserMetadata = "{}";
         [Tooltip("Automatically connect and join the room on Start")]
         public bool ConnectOnStart = true;
         [Tooltip("Automatically attach the runtime debug UI (F1 overlay)")]
@@ -69,6 +71,9 @@ namespace Client.Network
         public event Action OnDisconnected;
         public event Action<int> OnJoinRoomSuccess;
         public event Action<int> OnJoinRoomFailed;
+        public event Action<int, string> OnUserJoinedRoom;
+        public event Action<int>         OnUserLeftRoom;
+        public event Action<int>         OnUserSpeaking;
 
         // ── Internal ──────────────────────────────────────────────────────
         private IVoiceTransport _transport;
@@ -90,6 +95,11 @@ namespace Client.Network
 
         private void Awake()
         {
+            if (ClientId == 0)
+            {
+                ClientId = UnityEngine.Random.Range(100000, 999999999);
+                Debug.Log($"[VoiceNetworkManager] Auto-generated ClientId: {ClientId}");
+            }
             _encodeOutputBuf = new byte[4000];
             _diagnostics = new DiagnosticsCollector();
 
@@ -159,6 +169,8 @@ namespace Client.Network
             _transport.OnAudioReceived += OnAudioReceived;
             _transport.OnDisconnected  += OnDisconnect;
             _transport.OnHeartbeatAck  += OnHeartbeatAck;
+            _transport.OnUserJoined    += HandleUserJoined;
+            _transport.OnUserLeft      += HandleUserLeft;
 
             _lastServerHeartbeatTimeMs = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             _heartbeatTimer = 0f;
@@ -183,7 +195,7 @@ namespace Client.Network
                     CurrentState = State.Connected;
                     SetupAudioPipeline();
                     OnConnectSuccess?.Invoke();
-                    _transport.JoinRoom(RoomId);
+                    _transport.JoinRoom(RoomId, UserMetadata);
                 }
             });
         }
@@ -206,12 +218,13 @@ namespace Client.Network
         }
 
         /// <summary>Requests joining a specific room. If disconnected, updates the default RoomId to join on next connection.</summary>
-        public void JoinRoom(int roomId)
+        public void JoinRoom(int roomId, string metadata = null)
         {
             RoomId = roomId;
+            if (metadata != null) UserMetadata = metadata;
             if (CurrentState == State.Connected || CurrentState == State.InRoom)
             {
-                _transport?.JoinRoom(roomId);
+                _transport?.JoinRoom(roomId, UserMetadata);
             }
         }
 
@@ -220,7 +233,7 @@ namespace Client.Network
         {
             if (CurrentState == State.InRoom)
             {
-                JoinRoom(0);
+                JoinRoom(0, UserMetadata);
             }
         }
 
@@ -337,6 +350,10 @@ namespace Client.Network
             {
                 System.Buffers.ArrayPool<float>.Shared.Return(pcm);
             }
+
+            UnityMainThreadDispatcher.Enqueue(() => {
+                OnUserSpeaking?.Invoke(senderId);
+            });
         }
 
         private void OnDisconnect()
@@ -402,6 +419,8 @@ namespace Client.Network
                     _transport.OnAudioReceived -= OnAudioReceived;
                     _transport.OnDisconnected  -= OnDisconnect;
                     _transport.OnHeartbeatAck  -= OnHeartbeatAck;
+                    _transport.OnUserJoined    -= HandleUserJoined;
+                    _transport.OnUserLeft      -= HandleUserLeft;
                     _transport.Dispose();
                     _transport = null;
                 }
@@ -421,6 +440,16 @@ namespace Client.Network
         {
             _isDestroyed = true;
             TearDown();
+        }
+
+        private void HandleUserJoined(int clientId, string metadata)
+        {
+            UnityMainThreadDispatcher.Enqueue(() => OnUserJoinedRoom?.Invoke(clientId, metadata));
+        }
+
+        private void HandleUserLeft(int clientId)
+        {
+            UnityMainThreadDispatcher.Enqueue(() => OnUserLeftRoom?.Invoke(clientId));
         }
 
         private void OnHeartbeatAck(double rttMs)

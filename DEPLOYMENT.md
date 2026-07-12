@@ -68,5 +68,7 @@ Unity will download the package, and the `GoodVoice Chat` assets will appear in 
 1. In your scene, create an empty GameObject (e.g., `VoiceSystem`).
 2. Add the `VoiceNetworkManager` component to it.
 3. Configure the `ServerHost` to point to your deployed server IP (e.g., `123.45.67.89`) and select the preferred `Protocol`.
+4. (Optional) Set `UserMetadata` in the Inspector or via code (e.g., `{"name": "Player1"}`) to share metadata with others in the room. This metadata will be broadcasted to clients when they join or when you join via `OnUserJoinedRoom`.
+5. If `ClientId` is left as `0`, it will be automatically generated upon `Awake()`.
 
 For more detailed API usage and integration steps, please see `ClientIntegrationGuide.md`.
