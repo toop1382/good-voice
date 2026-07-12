@@ -10,6 +10,19 @@ namespace Server.Core
         private readonly ConcurrentDictionary<int, VoiceRoom> _rooms = new();
         private readonly ConcurrentDictionary<int, ClientSession> _sessions = new();
         private readonly ConcurrentDictionary<string, ClientSession> _endpointSessions = new();
+        private int _nextClientId = 100000;
+
+        public int GenerateUniqueClientId()
+        {
+            while (true)
+            {
+                int id = System.Threading.Interlocked.Increment(ref _nextClientId);
+                if (!_sessions.ContainsKey(id))
+                {
+                    return id;
+                }
+            }
+        }
 
         // ── Room helpers ──────────────────────────────────────────────────
         public VoiceRoom GetOrCreateRoom(int roomId) =>
@@ -108,6 +121,7 @@ namespace Server.Core
                 if (_rooms.TryGetValue(currentRoomId, out var room))
                 {
                     room.TryRemove(session.ClientId, out _);
+                    room.BroadcastUserLeft(session.ClientId);
                     session.RoomId = 0;
                     if (room.ClientCount == 0) _rooms.TryRemove(currentRoomId, out _);
                     return true;

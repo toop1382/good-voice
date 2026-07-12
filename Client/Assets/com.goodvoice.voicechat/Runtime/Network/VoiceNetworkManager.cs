@@ -35,9 +35,11 @@ namespace Client.Network
 
         [Header("Session")]
         [Tooltip("Unique numeric client ID for this Unity instance")]
-        public int ClientId = 1;
+        public int ClientId = 0;
         [Tooltip("Voice room to join on connect")]
         public int RoomId = 1;
+        [Tooltip("User metadata to share with others in the room")]
+        public string UserMetadata = "{}";
         [Tooltip("Automatically connect and join the room on Start")]
         public bool ConnectOnStart = true;
         [Tooltip("Automatically attach the runtime debug UI (F1 overlay)")]
@@ -69,6 +71,9 @@ namespace Client.Network
         public event Action OnDisconnected;
         public event Action<int> OnJoinRoomSuccess;
         public event Action<int> OnJoinRoomFailed;
+        public event Action<int, string> OnUserJoinedRoom;
+        public event Action<int>         OnUserLeftRoom;
+        public event Action<int>         OnUserSpeaking;
 
         // ── Internal ──────────────────────────────────────────────────────
         private IVoiceTransport _transport;
@@ -77,6 +82,7 @@ namespace Client.Network
         private OpusEncoder _encoder;
         private readonly Dictionary<int, OpusDecoder> _decoders = new();
         private readonly Dictionary<int, long> _lastReceiveTimeMs = new();
+        private readonly Dictionary<int, long> _lastSpeakEventTimeMs = new();
         private readonly List<int> _timedOutClients = new();
         private byte[] _encodeOutputBuf;
         private bool _isMuted;
@@ -159,11 +165,13 @@ namespace Client.Network
             _transport.OnAudioReceived += OnAudioReceived;
             _transport.OnDisconnected  += OnDisconnect;
             _transport.OnHeartbeatAck  += OnHeartbeatAck;
+            _transport.OnUserJoined    += HandleUserJoined;
+            _transport.OnUserLeft      += HandleUserLeft;
 
             _lastServerHeartbeatTimeMs = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             _heartbeatTimer = 0f;
 
-            bool ok = await _transport.ConnectAsync();
+            bool ok = await _transport.ConnectAsync(UserMetadata);
             if (!ok)
             {
                 UnityMainThreadDispatcher.Enqueue(() =>
@@ -176,6 +184,7 @@ namespace Client.Network
                 return;
             }
 
+            ClientId = _transport.ClientId;
             UnityMainThreadDispatcher.Enqueue(() =>
             {
                 lock (_audioLock)
@@ -183,7 +192,7 @@ namespace Client.Network
                     CurrentState = State.Connected;
                     SetupAudioPipeline();
                     OnConnectSuccess?.Invoke();
-                    _transport.JoinRoom(RoomId);
+                    _transport.JoinRoom(RoomId, UserMetadata);
                 }
             });
         }
@@ -206,12 +215,13 @@ namespace Client.Network
         }
 
         /// <summary>Requests joining a specific room. If disconnected, updates the default RoomId to join on next connection.</summary>
-        public void JoinRoom(int roomId)
+        public void JoinRoom(int roomId, string metadata = null)
         {
             RoomId = roomId;
+            if (metadata != null) UserMetadata = metadata;
             if (CurrentState == State.Connected || CurrentState == State.InRoom)
             {
-                _transport?.JoinRoom(roomId);
+                _transport?.JoinRoom(roomId, UserMetadata);
             }
         }
 
@@ -220,7 +230,7 @@ namespace Client.Network
         {
             if (CurrentState == State.InRoom)
             {
-                JoinRoom(0);
+                JoinRoom(0, UserMetadata);
             }
         }
 
@@ -337,6 +347,25 @@ namespace Client.Network
             {
                 System.Buffers.ArrayPool<float>.Shared.Return(pcm);
             }
+
+            long now = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            bool shouldFireEvent = false;
+
+            lock (_lastSpeakEventTimeMs)
+            {
+                if (!_lastSpeakEventTimeMs.TryGetValue(senderId, out long lastSpeak) || now - lastSpeak > 250) // 250ms debounce
+                {
+                    _lastSpeakEventTimeMs[senderId] = now;
+                    shouldFireEvent = true;
+                }
+            }
+
+            if (shouldFireEvent)
+            {
+                UnityMainThreadDispatcher.Enqueue(() => {
+                    OnUserSpeaking?.Invoke(senderId);
+                });
+            }
         }
 
         private void OnDisconnect()
@@ -395,6 +424,11 @@ namespace Client.Network
                     _lastReceiveTimeMs.Clear();
                 }
 
+                lock (_lastSpeakEventTimeMs)
+                {
+                    _lastSpeakEventTimeMs.Clear();
+                }
+
                 if (_transport != null)
                 {
                     _transport.OnHandshakeAck  -= OnHandshakeAck;
@@ -402,6 +436,8 @@ namespace Client.Network
                     _transport.OnAudioReceived -= OnAudioReceived;
                     _transport.OnDisconnected  -= OnDisconnect;
                     _transport.OnHeartbeatAck  -= OnHeartbeatAck;
+                    _transport.OnUserJoined    -= HandleUserJoined;
+                    _transport.OnUserLeft      -= HandleUserLeft;
                     _transport.Dispose();
                     _transport = null;
                 }
@@ -421,6 +457,16 @@ namespace Client.Network
         {
             _isDestroyed = true;
             TearDown();
+        }
+
+        private void HandleUserJoined(int clientId, string metadata)
+        {
+            UnityMainThreadDispatcher.Enqueue(() => OnUserJoinedRoom?.Invoke(clientId, metadata));
+        }
+
+        private void HandleUserLeft(int clientId)
+        {
+            UnityMainThreadDispatcher.Enqueue(() => OnUserLeftRoom?.Invoke(clientId));
         }
 
         private void OnHeartbeatAck(double rttMs)
@@ -458,6 +504,14 @@ namespace Client.Network
 
                     _playback?.RemoveClient(clientId);
                     _diagnostics?.RemoveClient(clientId);
+                }
+            }
+
+            lock (_lastSpeakEventTimeMs)
+            {
+                foreach (int clientId in _timedOutClients)
+                {
+                    _lastSpeakEventTimeMs.Remove(clientId);
                 }
             }
         }

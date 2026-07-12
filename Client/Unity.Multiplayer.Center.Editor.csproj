@@ -62,8 +62,8 @@
     <Compile Include="Library\PackageCache\com.unity.multiplayer.center\Editor\MultiplayerCenterWindow\TabGroup.cs" />
     <Compile Include="Library\PackageCache\com.unity.multiplayer.center\Editor\Questionnaire\PresetData.cs" />
     <Compile Include="Library\PackageCache\com.unity.multiplayer.center\Editor\Features\PackageManagement.cs" />
-    <Compile Include="Library\PackageCache\com.unity.multiplayer.center\Editor\Recommendations\RecommendationUtils.cs" />
     <Compile Include="Library\PackageCache\com.unity.multiplayer.center\Editor\Recommendations\Scoring.cs" />
+    <Compile Include="Library\PackageCache\com.unity.multiplayer.center\Editor\Recommendations\RecommendationUtils.cs" />
     <Compile Include="Library\PackageCache\com.unity.multiplayer.center\Editor\MultiplayerCenterWindow\UI\RecommendationView\SectionHeader.cs" />
     <Compile Include="Library\PackageCache\com.unity.multiplayer.center\Editor\Analytics\AnalyticsUtils.cs" />
     <Compile Include="Library\PackageCache\com.unity.multiplayer.center\Editor\Analytics\DebugAnalytics.cs" />

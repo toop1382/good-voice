@@ -46,8 +46,8 @@ namespace Server.Core
 
             switch (header.PacketType)
             {
-                case 1: HandleHandshake(header, senderEndPoint, senderChannel, serverReceiveTimestampMs); break;
-                case 2: HandleRoomJoin(header, senderEndPoint, senderChannel); break;
+                case 1: HandleHandshake(header, buffer, length, senderEndPoint, senderChannel, serverReceiveTimestampMs); break;
+                case 2: HandleRoomJoin(header, buffer, length, senderEndPoint, senderChannel); break;
                 case 3: HandleAudio(header, buffer, length, senderEndPoint); break;
                 case 4: HandleHeartbeat(header, senderEndPoint, senderChannel); break;
             }
@@ -56,12 +56,22 @@ namespace Server.Core
         // ── Handshake ────────────────────────────────────────────────────
         private void HandleHandshake(
             in VoicePacketHeader header,
+            byte[] buffer,
+            int length,
             IPEndPoint senderEndPoint,
             ISendChannel senderChannel,
             long serverReceiveTimestampMs)
         {
             int clientId = header.ClientId;
+            if (clientId == 0)
+            {
+                clientId = _roomManager.GenerateUniqueClientId();
+            }
             var session = _roomManager.RegisterClient(clientId, senderEndPoint, senderChannel);
+            if (header.PayloadLength > 0 && length >= VoicePacketHeader.HeaderSize + header.PayloadLength)
+            {
+                session.Metadata = System.Text.Encoding.UTF8.GetString(buffer, VoicePacketHeader.HeaderSize, header.PayloadLength);
+            }
 
             long serverSendTimestampMs = DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond;
 
@@ -83,6 +93,8 @@ namespace Server.Core
         // ── Room Join ────────────────────────────────────────────────────
         private void HandleRoomJoin(
             in VoicePacketHeader header,
+            byte[] buffer,
+            int length,
             IPEndPoint senderEndPoint,
             ISendChannel senderChannel)
         {
@@ -94,7 +106,13 @@ namespace Server.Core
                 return;
 
             session.LastActivityTicks = DateTime.UtcNow.Ticks;
-            bool success = _roomManager.JoinRoom(clientId, roomId, out _);
+
+            if (header.PayloadLength > 0 && length >= VoicePacketHeader.HeaderSize + header.PayloadLength)
+            {
+                session.Metadata = System.Text.Encoding.UTF8.GetString(buffer, VoicePacketHeader.HeaderSize, header.PayloadLength);
+            }
+
+            bool success = _roomManager.JoinRoom(clientId, roomId, out var room);
 
             byte[] ackBuf = new byte[VoicePacketHeader.HeaderSize + 4];
             var ackHeader = new VoicePacketHeader(
@@ -104,9 +122,15 @@ namespace Server.Core
                 payloadLength: 4);
 
             PacketSerializer.TrySerializeHeader(ackHeader, ackBuf.AsSpan());
-            BinaryPrimitives.WriteInt32LittleEndian(ackBuf.AsSpan(VoicePacketHeader.HeaderSize, 4), success ? 1 : 0);
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(ackBuf.AsSpan(VoicePacketHeader.HeaderSize, 4), success ? 1 : 0);
 
             senderChannel.Send(ackBuf, ackBuf.Length);
+
+            if (success && room != null)
+            {
+                room.SendExistingUsersTo(session);
+                room.BroadcastUserJoined(session);
+            }
             Console.WriteLine($"[{senderChannel.Protocol}] Client {clientId} joined room {roomId} (success={success})");
         }
 
@@ -118,17 +142,15 @@ namespace Server.Core
             IPEndPoint senderEndPoint)
         {
             int clientId = header.ClientId;
-            int roomId = header.RoomId;
 
             if (!_roomManager.TryGetSession(clientId, out var session) || session == null
                 || !session.EndPoint.Equals(senderEndPoint))
                 return;
 
-            if (session.RoomId != roomId) return;
-
             session.LastActivityTicks = DateTime.UtcNow.Ticks;
 
-            if (_roomManager.TryGetRoom(roomId, out var room) && room != null)
+            int trustedRoomId = session.RoomId;
+            if (trustedRoomId != 0 && _roomManager.TryGetRoom(trustedRoomId, out var room) && room != null)
                 room.Broadcast(buffer, length, clientId);
         }
 

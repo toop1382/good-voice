@@ -23,7 +23,7 @@ namespace Client.Network
 
         public string Protocol    => "TCP";
         public bool   IsConnected { get; private set; }
-        public int    ClientId    { get; }
+        public int    ClientId    { get; set; }
         public int    RoomId      { get; private set; }
 
         public event Action<int, byte[], int, uint, long> OnAudioReceived;
@@ -31,12 +31,15 @@ namespace Client.Network
         public event Action<bool>             OnRoomJoinAck;
         public event Action                   OnDisconnected;
         public event Action<double>           OnHeartbeatAck;
+        public event Action<int, string>      OnUserJoined;
+        public event Action<int>              OnUserLeft;
 
         private readonly string _host;
         private readonly int    _port;
         private TcpClient       _tcp;
         private NetworkStream   _stream;
         private CancellationTokenSource _cts;
+        private TaskCompletionSource<bool> _handshakeTcs;
         private uint  _outSeq;
         private long  _lastHandshakeMs;
         private readonly ConcurrentQueue<byte[]> _sendQueue = new();
@@ -51,7 +54,7 @@ namespace Client.Network
             _host = host; _port = port; ClientId = clientId;
         }
 
-        public async Task<bool> ConnectAsync(CancellationToken ct = default)
+        public async Task<bool> ConnectAsync(string metadata = "", CancellationToken ct = default)
         {
             try
             {
@@ -67,22 +70,34 @@ namespace Client.Network
                 await connectTask; // rethrow any socket exception
                 _stream = _tcp.GetStream();
                 _cts = new CancellationTokenSource();
+                _handshakeTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 IsConnected = true;
                 _ = Task.Run(() => ReceiveLoopAsync(_cts.Token));
                 _sendLoopTask = Task.Run(() => SendLoopAsync(_cts.Token));
-                SendHandshake();
+                SendHandshake(metadata);
+
+                var handshakeTimeoutTask = Task.Delay(5000, ct);
+                if (await Task.WhenAny(_handshakeTcs.Task, handshakeTimeoutTask) == handshakeTimeoutTask)
+                {
+                    Disconnect();
+                    throw new TimeoutException("Handshake timed out.");
+                }
+
+                await _handshakeTcs.Task;
                 Debug.Log($"[TcpTransport] Connected to {_host}:{_port} as client {ClientId}");
                 return true;
             }
             catch (Exception ex) { Debug.LogError($"[TcpTransport] Connect failed: {ex.Message}"); return false; }
         }
 
-        public void JoinRoom(int roomId)
+        public void JoinRoom(int roomId, string metadata = "")
         {
             RoomId = roomId;
-            byte[] buf = new byte[HeaderSize];
-            WriteHeader(buf, 2, roomId, ClientId, _outSeq++, NowMs(), 0);
-            TrySendFramed(buf, HeaderSize);
+            byte[] metadataBytes = System.Text.Encoding.UTF8.GetBytes(metadata ?? string.Empty);
+            byte[] buf = new byte[HeaderSize + metadataBytes.Length];
+            WriteHeader(buf, 2, roomId, ClientId, _outSeq++, NowMs(), metadataBytes.Length);
+            Buffer.BlockCopy(metadataBytes, 0, buf, HeaderSize, metadataBytes.Length);
+            TrySendFramed(buf, buf.Length);
         }
 
         public void SendAudio(byte[] opus, int len)
@@ -99,7 +114,7 @@ namespace Client.Network
             if (!IsConnected) return;
             byte[] buf = new byte[HeaderSize];
             WriteHeader(buf, 4, RoomId, ClientId, _outSeq++, NowMs(), 0);
-            TrySendFramed(buf, HeaderSize);
+            TrySendFramed(buf, buf.Length);
         }
 
         public void Disconnect()
@@ -109,12 +124,14 @@ namespace Client.Network
             try { _tcp?.Close(); } catch { }
         }
 
-        private void SendHandshake()
+        private void SendHandshake(string metadata)
         {
             _lastHandshakeMs = NowMs();
-            byte[] buf = new byte[HeaderSize];
-            WriteHeader(buf, 1, 0, ClientId, _outSeq++, _lastHandshakeMs, 0);
-            TrySendFramed(buf, HeaderSize);
+            byte[] metadataBytes = System.Text.Encoding.UTF8.GetBytes(metadata ?? string.Empty);
+            byte[] buf = new byte[HeaderSize + metadataBytes.Length];
+            WriteHeader(buf, 1, 0, 0, _outSeq++, _lastHandshakeMs, metadataBytes.Length);
+            System.Buffer.BlockCopy(metadataBytes, 0, buf, HeaderSize, metadataBytes.Length);
+            TrySendFramed(buf, buf.Length);
         }
 
         private async Task ReceiveLoopAsync(CancellationToken ct)
@@ -157,6 +174,8 @@ namespace Client.Network
             switch (pktType)
             {
                 case 1:
+                    ClientId = senderId;
+                    _handshakeTcs?.TrySetResult(true);
                     OnHandshakeAck?.Invoke(NowMs() - _lastHandshakeMs);
                     break;
                 case 2:
@@ -183,6 +202,16 @@ namespace Client.Network
                     long heartbeatTs = BinaryPrimitives.ReadInt64LittleEndian(buf.AsSpan(16, 8));
                     double heartbeatRtt = NowMs() - heartbeatTs;
                     OnHeartbeatAck?.Invoke(heartbeatRtt);
+                    break;
+                case 5:
+                    if (payloadLen >= 0)
+                    {
+                        string metadata = System.Text.Encoding.UTF8.GetString(buf, HeaderSize, payloadLen);
+                        OnUserJoined?.Invoke(senderId, metadata);
+                    }
+                    break;
+                case 6:
+                    OnUserLeft?.Invoke(senderId);
                     break;
             }
         }

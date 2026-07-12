@@ -19,12 +19,12 @@ public class ServerFixture : IDisposable
 
         // Dynamically detect build configuration (Release or Debug)
         string config = AppContext.BaseDirectory.Contains("Release") ? "Release" : "Debug";
-        string serverPath = Path.Combine(serverProjDir, $"bin/{config}/net10.0", serverExeName);
+        string serverPath = Path.Combine(serverProjDir, $"bin/{config}/net8.0", serverExeName);
 
         if (!File.Exists(serverPath))
         {
             string otherConfig = config == "Release" ? "Debug" : "Release";
-            string fallbackPath = Path.Combine(serverProjDir, $"bin/{otherConfig}/net10.0", serverExeName);
+            string fallbackPath = Path.Combine(serverProjDir, $"bin/{otherConfig}/net8.0", serverExeName);
             if (File.Exists(fallbackPath))
             {
                 serverPath = fallbackPath;

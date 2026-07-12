@@ -40,7 +40,7 @@ namespace Client.Editor
             var manager = go.AddComponent<VoiceNetworkManager>();
             manager.ServerHost = "127.0.0.1";
             manager.ServerPort = 0; // Default resolves per-protocol
-            manager.ClientId = Random.Range(1000, 9999);
+            manager.ClientId = 0;
             manager.RoomId = 1;
             manager.ConnectOnStart = false; // Give users manual control by default
             manager.AutoAttachDebugUI = true;
