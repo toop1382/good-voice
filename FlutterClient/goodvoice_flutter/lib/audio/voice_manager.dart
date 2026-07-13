@@ -1,8 +1,8 @@
 import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:record/record.dart';
 import 'package:flutter_opus/flutter_opus.dart';
+import 'package:sound_stream/sound_stream.dart';
 import '../network/udp_voice_client.dart';
 
 class VoiceManager {
@@ -10,6 +10,10 @@ class VoiceManager {
   final _audioRecorder = AudioRecorder();
   StreamSubscription? _recordSubscription;
   StreamSubscription? _clientSubscription;
+
+  // sound_stream for playback
+  final PlayerStream _player = PlayerStream();
+  bool _playerInitialized = false;
 
   bool _isRecording = false;
 
@@ -28,6 +32,7 @@ class VoiceManager {
 
   VoiceManager(this._client) {
     _initOpus();
+    _initPlayer();
   }
 
   void _initOpus() {
@@ -43,6 +48,16 @@ class VoiceManager {
     );
   }
 
+  Future<void> _initPlayer() async {
+    try {
+      await _player.initialize();
+      await _player.start();
+      _playerInitialized = true;
+    } catch (e) {
+      debugPrint('Failed to initialize playback: $e');
+    }
+  }
+
   Future<void> startRecording() async {
     if (_isRecording) return;
 
@@ -54,6 +69,11 @@ class VoiceManager {
           encoder: AudioEncoder.pcm16bits,
           sampleRate: sampleRate,
           numChannels: channels,
+          echoCancel: true,
+          noiseSuppress: true,
+          androidConfig: AndroidRecordConfig(
+            audioSource: AndroidAudioSource.voiceCommunication,
+          ),
         ),
       );
 
@@ -100,11 +120,9 @@ class VoiceManager {
     try {
       final pcmData = _decoder!.decode(opusData, pcmFrameSize);
 
-      // Playback logic goes here
-      // For now, we decode successfully but drop the PCM data since
-      // simple audio players don't support streaming PCM out-of-the-box.
-      if (pcmData != null && pcmData.isNotEmpty) {
-          // Playback PCM data
+      // Playback PCM data using sound_stream
+      if (pcmData != null && pcmData.isNotEmpty && _playerInitialized) {
+          _player.writeChunk(pcmData);
       }
     } catch (e) {
       debugPrint('Opus decoding error: $e');
@@ -122,6 +140,7 @@ class VoiceManager {
 
   void dispose() {
     stopRecording();
+    _player.stop();
     _audioRecorder.dispose();
     _encoder?.dispose();
     _decoder?.dispose();
