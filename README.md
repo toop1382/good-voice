@@ -190,3 +190,14 @@ cmake --build build-android
 
 ## License
 MIT
+
+### 4. Run the Flutter Client
+A Flutter implementation of the voice client is available in `FlutterClient/goodvoice_flutter`. It uses `flutter_opus` for encoding/decoding and the `record` package for capture.
+
+```bash
+cd FlutterClient/goodvoice_flutter
+flutter pub get
+flutter run
+```
+
+*Note: The Flutter client currently requires a physical device or an emulator with microphone support.*
